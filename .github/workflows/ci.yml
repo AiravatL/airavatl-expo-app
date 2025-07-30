@@ -2,23 +2,21 @@ name: CI
 
 on:
   pull_request:
-    branches: [ dev, main ]
+    branches: [dev, main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      # Node / PNPM
+      # Node + npm cache
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
+          cache: 'npm'
 
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-
-      # Basic quality gates
-      - run: pnpm lint      # eslint / prettier (add script in package.json)
-      - run: pnpm test      # jest / vitest (set up later)
+      - run: npm ci # fast, uses package-lock
+      - run: npm run lint
+      - run: npm test

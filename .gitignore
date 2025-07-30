@@ -1,0 +1,17 @@
+# build / cache
+node_modules/
+.expo/
+.expo-shared/
+android/.gradle/
+ios/Pods/
+
+# secrets
+.env
+*.jks
+*.keystore
+
+# misc
+.DS_Store
+.idea/
+.vscode/
+*.log
