@@ -4,7 +4,7 @@ A React Native + Expo application for the AiravatL logistics platform.
 
 ## Tech Stack
 
-- Expo SDK 50
+- Expo SDK 53
 - React 18, React Navigation 7
 - Supabase (auth & data)
 - TypeScript, EAS Build
