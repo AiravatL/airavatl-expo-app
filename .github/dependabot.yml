@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # JS/TS dependencies
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      expo-and-react:
+        patterns:
+          - 'expo*'
+          - 'react*'
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
