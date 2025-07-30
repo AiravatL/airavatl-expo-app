@@ -12,6 +12,6 @@ GitHub Actions will run the same tests; do not merge while checks are red.
 
 ```bash
 corepack enable          # enables pnpm
-pnpm install
-pnpm start               # expo start
+npm install
+npm start               # expo start
 ```
