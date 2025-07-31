@@ -2,7 +2,7 @@
 
 - [ ] PR targets **`dev`**
 - [ ] Title uses Conventional Commit prefix
-- [ ] `pnpm test` & `pnpm lint` pass locally
+- [ ] `npm test` & `npm lint` pass locally
 - [ ] Screenshots / screen-casts attached (UI changes)
 - [ ] Relevant issue linked (`Fixes #123`)
 
