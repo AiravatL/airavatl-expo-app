@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { performanceService } from '@/lib/performanceService';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
@@ -78,7 +79,10 @@ export default function CreateAuctionScreen() {
     setDurationError(null);
 
     if (!from || !to || !description || !weight || !vehicleType) {
-      Alert.alert('Error', 'Please fill in all fields and select a vehicle type');
+      Alert.alert(
+        'Error',
+        'Please fill in all fields and select a vehicle type'
+      );
       return;
     }
 
@@ -117,8 +121,11 @@ export default function CreateAuctionScreen() {
 
     setIsSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      // Get user from cache or quickly fetch
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
         Alert.alert('Error', 'Please sign in to create an auction');
         return;
@@ -127,25 +134,49 @@ export default function CreateAuctionScreen() {
       const startTime = new Date();
       const endTime = new Date(startTime.getTime() + finalDuration * 60000);
 
-      const { error } = await supabase
-        .from('auctions')
-        .insert({
-          title: `Delivery from ${from} to ${to}`,
-          description: `${description}\nWeight: ${weight} kg\nVehicle Type: ${
-            VEHICLE_TYPES.find(v => v.id === vehicleType)?.title
-          }`,
-          start_time: startTime.toISOString(),
-          end_time: endTime.toISOString(),
-          created_by: user.id,
-          vehicle_type: vehicleType,
-          consignment_date: consignmentDate.toISOString(),
-        });
+      const auctionData = {
+        title: `Delivery from ${from} to ${to}`,
+        description: `${description}\nWeight: ${weight} kg\nVehicle Type: ${
+          VEHICLE_TYPES.find((v) => v.id === vehicleType)?.title
+        }`,
+        start_time: startTime.toISOString(),
+        end_time: endTime.toISOString(),
+        created_by: user.id,
+        vehicle_type: vehicleType,
+        consignment_date: consignmentDate.toISOString(),
+      };
 
-      if (error) throw error;
+      // Use performanceService for optimized creation
+      const result = await performanceService.createAuctionOptimized(
+        auctionData
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create auction');
+      }
+
+      // Send notifications in background (non-blocking)
+      setTimeout(async () => {
+        try {
+          const { auctionNotificationService } = await import(
+            '@/lib/auctionNotifications'
+          );
+          await auctionNotificationService.notifyNewAuction(
+            result.data.id,
+            `Delivery from ${from} to ${to}`,
+            vehicleType,
+            parseFloat(weight)
+          );
+        } catch (notificationError) {
+          console.error('Background notification error:', notificationError);
+        }
+      }, 100); // Small delay to ensure UI updates first
 
       Alert.alert(
-        'Success', 
-        `Auction created successfully. It will close in ${finalDuration} ${finalDuration === 1 ? 'minute' : 'minutes'}.`,
+        'Success',
+        `Auction created successfully. It will close in ${finalDuration} ${
+          finalDuration === 1 ? 'minute' : 'minutes'
+        }.`,
         [
           {
             text: 'OK',
@@ -160,11 +191,11 @@ export default function CreateAuctionScreen() {
               setCustomDuration('');
               setIsCustomDuration(false);
               setConsignmentDate(new Date());
-              
+
               // Navigate to auctions tab
               router.push('/auctions');
-            }
-          }
+            },
+          },
         ]
       );
     } catch (error) {
@@ -192,7 +223,7 @@ export default function CreateAuctionScreen() {
   const handleCustomDurationChange = (text: string) => {
     setCustomDuration(text);
     setDurationError(null);
-    
+
     const parsedDuration = parseInt(text, 10);
     if (text && (isNaN(parsedDuration) || parsedDuration < 5)) {
       setDurationError('Duration must be at least 5 minutes');
@@ -206,7 +237,9 @@ export default function CreateAuctionScreen() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>Create New Auction</Text>
-          <Text style={styles.subtitle}>Fill in the details for your delivery request</Text>
+          <Text style={styles.subtitle}>
+            Fill in the details for your delivery request
+          </Text>
         </View>
 
         <View style={styles.section}>
@@ -274,25 +307,33 @@ export default function CreateAuctionScreen() {
                 key={type.id}
                 style={[
                   styles.vehicleCard,
-                  vehicleType === type.id && styles.vehicleCardSelected
+                  vehicleType === type.id && styles.vehicleCardSelected,
                 ]}
-                onPress={() => setVehicleType(type.id)}>
+                onPress={() => setVehicleType(type.id)}
+              >
                 <View style={styles.vehicleIcon}>
-                  <Feather name="truck" size={24} color={vehicleType === type.id ? '#FFFFFF' : '#6C757D'} />
+                  <Feather
+                    name="truck"
+                    size={24}
+                    color={vehicleType === type.id ? '#FFFFFF' : '#6C757D'}
+                  />
                 </View>
                 <View style={styles.vehicleContent}>
                   <Text
                     style={[
                       styles.vehicleTitle,
-                      vehicleType === type.id && styles.vehicleTitleSelected
-                    ]}>
+                      vehicleType === type.id && styles.vehicleTitleSelected,
+                    ]}
+                  >
                     {type.title}
                   </Text>
                   <Text
                     style={[
                       styles.vehicleDescription,
-                      vehicleType === type.id && styles.vehicleDescriptionSelected
-                    ]}>
+                      vehicleType === type.id &&
+                        styles.vehicleDescriptionSelected,
+                    ]}
+                  >
                     {type.description}
                   </Text>
                 </View>
@@ -305,7 +346,8 @@ export default function CreateAuctionScreen() {
           <Text style={styles.label}>Consignment Date</Text>
           <TouchableOpacity
             style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}>
+            onPress={() => setShowDatePicker(true)}
+          >
             <Feather name="calendar" size={20} color="#007AFF" />
             <Text style={styles.dateButtonText}>
               {format(consignmentDate, 'MMM d, yyyy')}
@@ -330,15 +372,29 @@ export default function CreateAuctionScreen() {
                 key={option.value}
                 style={[
                   styles.durationOption,
-                  !isCustomDuration && duration === option.value && styles.durationOptionSelected
+                  !isCustomDuration &&
+                    duration === option.value &&
+                    styles.durationOptionSelected,
                 ]}
-                onPress={() => handleDurationSelect(option.value)}>
-                <Feather name="clock" size={16} color={!isCustomDuration && duration === option.value ? '#FFFFFF' : '#6C757D'} />
+                onPress={() => handleDurationSelect(option.value)}
+              >
+                <Feather
+                  name="clock"
+                  size={16}
+                  color={
+                    !isCustomDuration && duration === option.value
+                      ? '#FFFFFF'
+                      : '#6C757D'
+                  }
+                />
                 <Text
                   style={[
                     styles.durationOptionText,
-                    !isCustomDuration && duration === option.value && styles.durationOptionTextSelected
-                  ]}>
+                    !isCustomDuration &&
+                      duration === option.value &&
+                      styles.durationOptionTextSelected,
+                  ]}
+                >
                   {option.label}
                 </Text>
               </TouchableOpacity>
@@ -346,15 +402,24 @@ export default function CreateAuctionScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.customDurationButton, isCustomDuration && styles.customDurationButtonSelected]}
-            onPress={handleCustomDurationPress}>
+            style={[
+              styles.customDurationButton,
+              isCustomDuration && styles.customDurationButtonSelected,
+            ]}
+            onPress={handleCustomDurationPress}
+          >
             <View style={styles.customDurationContent}>
-              <Feather name="clock" size={20} color={isCustomDuration ? '#FFFFFF' : '#6C757D'} />
+              <Feather
+                name="clock"
+                size={20}
+                color={isCustomDuration ? '#FFFFFF' : '#6C757D'}
+              />
               <Text
                 style={[
                   styles.customDurationText,
-                  isCustomDuration && styles.customDurationTextSelected
-                ]}>
+                  isCustomDuration && styles.customDurationTextSelected,
+                ]}
+              >
                 Custom Duration
               </Text>
             </View>
@@ -366,7 +431,7 @@ export default function CreateAuctionScreen() {
                 <TextInput
                   style={[
                     styles.durationInput,
-                    durationError && styles.durationInputError
+                    durationError && styles.durationInputError,
                   ]}
                   value={customDuration}
                   onChangeText={handleCustomDurationChange}
@@ -385,9 +450,13 @@ export default function CreateAuctionScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          style={[
+            styles.submitButton,
+            isSubmitting && styles.submitButtonDisabled,
+          ]}
           onPress={handleSubmit}
-          disabled={isSubmitting}>
+          disabled={isSubmitting}
+        >
           {isSubmitting ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
@@ -451,8 +520,8 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     ...Platform.select({
       web: {
-        outlineStyle: 'none',
-      },
+        outline: 'none',
+      } as any,
     }),
   },
   textArea: {
@@ -468,8 +537,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     ...Platform.select({
       web: {
-        outlineStyle: 'none',
-      },
+        outline: 'none',
+      } as any,
     }),
   },
   weightInput: {
@@ -489,8 +558,8 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     ...Platform.select({
       web: {
-        outlineStyle: 'none',
-      },
+        outline: 'none',
+      } as any,
     }),
   },
   weightUnit: {

@@ -25,6 +25,7 @@ type Profile = {
   address: string | null;
   bio: string | null;
   role: string;
+  vehicle_type?: string | null; // Add vehicle type for drivers
 };
 
 type Auction = {
@@ -47,7 +48,13 @@ type Bid = {
   auction: Auction | null;
 };
 
-type EditableField = 'username' | 'phone_number' | 'upi_id' | 'address' | 'bio';
+type EditableField =
+  | 'username'
+  | 'phone_number'
+  | 'upi_id'
+  | 'address'
+  | 'bio'
+  | 'vehicle_type';
 
 export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<
@@ -109,8 +116,6 @@ export default function ProfileScreen() {
 
       // Fetch user's bids if they are a driver
       if (profileData.role === 'driver') {
-        console.log('Fetching bids for driver:', user.id);
-
         const { data: bidsData, error: bidsError } = await supabase
           .from('auction_bids')
           .select(
@@ -135,8 +140,6 @@ export default function ProfileScreen() {
           )
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
-
-        console.log('Bids query result:', { bidsData, bidsError });
 
         if (bidsError) {
           console.error('Error fetching bids:', bidsError);
@@ -163,7 +166,6 @@ export default function ProfileScreen() {
             : null,
         }));
 
-        console.log('Transformed bids:', transformedBids);
         setBids(transformedBids);
       }
     } catch (error) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,28 +13,11 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { performanceService } from '@/lib/performanceService';
+import { dataService, type Auction, type Bid } from '@/lib/dataService';
 import { format, isPast } from 'date-fns';
 
 type UserRole = 'consigner' | 'driver';
-
-type Auction = {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  end_time: string;
-  vehicle_type: string;
-  created_at: string;
-};
-
-type Bid = {
-  id: string;
-  amount: number;
-  status: string;
-  created_at: string;
-  is_winning_bid: boolean;
-  auction: Auction | null;
-};
 
 const VEHICLE_TYPES = [
   { id: 'all', label: 'All Vehicles', icon: 'grid' },
@@ -56,138 +39,134 @@ export default function AuctionsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedVehicleType, setSelectedVehicleType] = useState<string>('all');
 
-  const checkAndCloseExpiredAuctions = async () => {
-    try {
-      const { error } = await supabase.rpc('check_and_close_expired_auctions');
-      if (error) {
-        console.error('Error checking expired auctions:', error);
-      }
-    } catch (err) {
-      console.error('Error calling check_and_close_expired_auctions:', err);
-    }
-  };
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setError(null);
-      
-      // First, check and close any expired auctions
-      await checkAndCloseExpiredAuctions();
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
+
+      // Remove expensive checkExpiredAuctions() call
+      // Let database triggers handle auction closure automatically
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
         router.replace('/sign-in');
         return;
       }
 
-      // Get user role
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
+      // Get user profile to determine role and vehicle type
+      const profile = await dataService.getUserProfile(user.id);
 
-      if (profileError) {
-        console.error('Profile error:', profileError);
-        throw profileError;
+      if (!profile) {
+        throw new Error('User profile not found');
       }
 
-      if (profile) {
-        setUserRole(profile.role as UserRole);
+      setUserRole(profile.role as UserRole);
 
-        if (profile.role === 'driver') {
-          console.log('Fetching auctions for driver...');
-          
-          // Fetch auctions that the driver should see
-          const { data: visibleAuctions, error: auctionsError } = await supabase
-            .from('auctions')
-            .select('*')
-            .or('status.eq.active,winner_id.eq.' + user.id)
-            .order('created_at', { ascending: false });
+      if (profile.role === 'driver') {
+        console.log('Fetching auctions for driver...');
 
-          console.log('Visible auctions for driver:', visibleAuctions);
-          console.log('Auctions error:', auctionsError);
+        // Use optimized performance service for faster loading
+        const vehicleTypeFilter =
+          selectedVehicleType === 'all' ? undefined : selectedVehicleType;
+        const effectiveVehicleType =
+          vehicleTypeFilter ||
+          (profile.vehicle_type ? profile.vehicle_type : undefined);
+        const optimizedAuctions =
+          await performanceService.getAvailableAuctionsOptimized(
+            'driver',
+            effectiveVehicleType
+          );
 
-          if (auctionsError) {
-            console.error('Error fetching auctions:', auctionsError);
-            throw auctionsError;
-          }
+        // Convert optimized auctions to match Auction interface
+        const convertedAuctions: Auction[] = optimizedAuctions.map(
+          (auction) => ({
+            ...auction,
+            created_at: auction.start_time, // Use start_time as created_at fallback
+          })
+        );
 
-          setAuctions(visibleAuctions || []);
+        setAuctions(convertedAuctions);
 
-          // Fetch driver's bids with auction details
-          const { data: bidsData, error: bidsError } = await supabase
-            .from('auction_bids')
-            .select(`
-              *,
-              auction:auctions!auction_bids_auction_id_fkey (
-                id,
-                title,
-                description,
-                status,
-                end_time,
-                vehicle_type,
-                created_at
-              )
-            `)
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
+        // Fetch driver's bids efficiently using cached data
+        const { data: userBids } = await supabase
+          .from('auction_bids')
+          .select(
+            `
+            id,
+            amount,
+            created_at,
+            is_winning_bid,
+            auction_id,
+            user_id,
+            auction:auctions(*)
+          `
+          )
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
 
-          if (bidsError) {
-            console.error('Error fetching bids:', bidsError);
-            throw bidsError;
-          }
-          setBids(bidsData || []);
-        } else {
-          // Fetch consigner's auctions
-          const { data: auctionsData, error: auctionsError } = await supabase
-            .from('auctions')
-            .select('*')
-            .eq('created_by', user.id)
-            .order('created_at', { ascending: false });
+        // Map to proper Bid format
+        const mappedBids: Bid[] = (userBids || []).map((bid) => ({
+          id: bid.id,
+          amount: bid.amount,
+          status: 'active', // Default status
+          created_at: bid.created_at,
+          is_winning_bid: bid.is_winning_bid,
+          auction: bid.auction,
+          user_id: bid.user_id,
+          auction_id: bid.auction_id,
+        }));
 
-          if (auctionsError) throw auctionsError;
-          setAuctions(auctionsData || []);
-        }
+        setBids(mappedBids);
+      } else {
+        // Use optimized service for consigner auctions
+        const userAuctions = await dataService.getUserAuctions(user.id, true); // Force refresh
+        setAuctions(userAuctions);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
       setError('Failed to load data. Please try again.');
-      
-      // Show more detailed error for debugging
-      if (error instanceof Error) {
+
+      // Handle error appropriately
+      if (__DEV__ && error instanceof Error) {
         Alert.alert('Debug Error', error.message);
       }
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [router, selectedVehicleType]);
 
   // Filter auctions based on selected vehicle type
   useEffect(() => {
     if (selectedVehicleType === 'all') {
       setFilteredAuctions(auctions);
     } else {
-      const filtered = auctions.filter(auction => auction.vehicle_type === selectedVehicleType);
+      const filtered = auctions.filter(
+        (auction) => auction.vehicle_type === selectedVehicleType
+      );
       setFilteredAuctions(filtered);
     }
   }, [auctions, selectedVehicleType]);
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  };
+
   useEffect(() => {
     fetchData();
-    
-    // Set up an interval to check for expired auctions every 60 seconds
-    const interval = setInterval(() => {
-      checkAndCloseExpiredAuctions().then(() => {
-        // Silently refresh data after checking for expired auctions
-        fetchData();
-      });
-    }, 60000);
+
+    // Simplified interval - just refresh data, let database handle closures
+    const interval = setInterval(async () => {
+      await fetchData(); // Simple data refresh, no expensive operations
+    }, 120000); // Increased to 2 minutes for better performance
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
 
   const getAuctionStatusColor = (auction: Auction) => {
     if (auction.status === 'active') {
@@ -221,27 +200,35 @@ export default function AuctionsScreen() {
     return (
       <View style={styles.filterContainer}>
         <Text style={styles.filterTitle}>Filter by Vehicle Type</Text>
-        <ScrollView 
-          horizontal 
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContainer}>
+          contentContainerStyle={styles.filterScrollContainer}
+        >
           {VEHICLE_TYPES.map((vehicleType) => (
             <TouchableOpacity
               key={vehicleType.id}
               style={[
                 styles.filterChip,
-                selectedVehicleType === vehicleType.id && styles.filterChipSelected
+                selectedVehicleType === vehicleType.id &&
+                  styles.filterChipSelected,
               ]}
-              onPress={() => setSelectedVehicleType(vehicleType.id)}>
-              <Feather 
-                name={vehicleType.icon as any} 
-                size={16} 
-                color={selectedVehicleType === vehicleType.id ? '#FFFFFF' : '#6C757D'} 
+              onPress={() => setSelectedVehicleType(vehicleType.id)}
+            >
+              <Feather
+                name={vehicleType.icon as any}
+                size={16}
+                color={
+                  selectedVehicleType === vehicleType.id ? '#FFFFFF' : '#6C757D'
+                }
               />
-              <Text style={[
-                styles.filterChipText,
-                selectedVehicleType === vehicleType.id && styles.filterChipTextSelected
-              ]}>
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedVehicleType === vehicleType.id &&
+                    styles.filterChipTextSelected,
+                ]}
+              >
                 {vehicleType.label}
               </Text>
             </TouchableOpacity>
@@ -276,18 +263,22 @@ export default function AuctionsScreen() {
         <View style={styles.emptyState}>
           <Feather name="clock" size={48} color="#6C757D" />
           <Text style={styles.emptyStateTitle}>
-            {selectedVehicleType === 'all' ? 'No Active Auctions' : 'No Jobs for Selected Vehicle Type'}
+            {selectedVehicleType === 'all'
+              ? 'No Active Auctions'
+              : 'No Jobs for Selected Vehicle Type'}
           </Text>
           <Text style={styles.emptyStateText}>
-            {selectedVehicleType === 'all' 
+            {selectedVehicleType === 'all'
               ? 'No active auctions available at the moment'
-              : `No active auctions for ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.label}`
-            }
+              : `No active auctions for ${
+                  VEHICLE_TYPES.find((v) => v.id === selectedVehicleType)?.label
+                }`}
           </Text>
           {selectedVehicleType !== 'all' && (
             <TouchableOpacity
               style={styles.clearFilterButton}
-              onPress={() => setSelectedVehicleType('all')}>
+              onPress={() => setSelectedVehicleType('all')}
+            >
               <Text style={styles.clearFilterButtonText}>Show All Jobs</Text>
             </TouchableOpacity>
           )}
@@ -299,13 +290,16 @@ export default function AuctionsScreen() {
       <TouchableOpacity
         key={auction.id}
         style={styles.card}
-        onPress={() => router.push(`/auctions/${auction.id}`)}>
+        onPress={() => router.push(`/auctions/${auction.id}`)}
+      >
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{auction.title}</Text>
-          <View style={[
-            styles.statusBadge,
-            { backgroundColor: getAuctionStatusColor(auction) }
-          ]}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getAuctionStatusColor(auction) },
+            ]}
+          >
             <Text style={styles.statusText}>
               {getAuctionStatusText(auction)}
             </Text>
@@ -319,9 +313,10 @@ export default function AuctionsScreen() {
         <View style={styles.vehicleInfo}>
           <Feather name="truck" size={16} color="#6C757D" />
           <Text style={styles.vehicleType}>
-            {auction.vehicle_type.split('_').map(word => 
-              word.charAt(0).toUpperCase() + word.slice(1)
-            ).join(' ')}
+            {auction.vehicle_type
+              .split('_')
+              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ')}
           </Text>
         </View>
 
@@ -331,9 +326,11 @@ export default function AuctionsScreen() {
             {auction.status === 'active' && isPast(new Date(auction.end_time))
               ? `Expired ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
               : auction.status === 'cancelled'
-              ? `Cancelled ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
-              : `Ends ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
-            }
+              ? `Cancelled ${format(
+                  new Date(auction.end_time),
+                  'MMM d, h:mm a'
+                )}`
+              : `Ends ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`}
           </Text>
         </View>
       </TouchableOpacity>
@@ -353,61 +350,73 @@ export default function AuctionsScreen() {
       );
     }
 
-    return bids.map((bid) => {
-      // Skip rendering if auction data is missing
-      if (!bid.auction) {
-        return null;
-      }
+    return bids
+      .map((bid) => {
+        // Skip rendering if auction data is missing
+        if (!bid.auction) {
+          return null;
+        }
 
-      return (
-        <TouchableOpacity
-          key={bid.id}
-          style={styles.card}
-          onPress={() => router.push(`/auctions/${bid.auction.id}`)}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>{bid.auction.title}</Text>
-            <View style={[
-              styles.statusBadge,
-              { backgroundColor: getAuctionStatusColor(bid.auction) }
-            ]}>
-              <Text style={styles.statusText}>
-                {getAuctionStatusText(bid.auction)}
+        return (
+          <TouchableOpacity
+            key={bid.id}
+            style={styles.card}
+            onPress={() => {
+              if (bid.auction) {
+                router.push(`/auctions/${bid.auction.id}`);
+              }
+            }}
+          >
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>{bid.auction.title}</Text>
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getAuctionStatusColor(bid.auction) },
+                ]}
+              >
+                <Text style={styles.statusText}>
+                  {getAuctionStatusText(bid.auction)}
+                </Text>
+              </View>
+            </View>
+
+            {bid.is_winning_bid && (
+              <View style={styles.winnerBadge}>
+                <Feather name="award" size={16} color="#FFD700" />
+                <Text style={styles.winnerText}>Winning Bid</Text>
+              </View>
+            )}
+
+            <Text style={styles.description} numberOfLines={2}>
+              {bid.auction.description}
+            </Text>
+
+            <View style={styles.bidInfo}>
+              <View style={styles.bidAmount}>
+                <Feather name="credit-card" size={16} color="#28A745" />
+                <Text style={styles.bidAmountText}>₹{bid.amount}</Text>
+              </View>
+              <Text style={styles.bidTime}>
+                {bid.created_at
+                  ? format(new Date(bid.created_at), 'MMM d, h:mm a')
+                  : 'Unknown date'}
               </Text>
             </View>
-          </View>
 
-          {bid.is_winning_bid && (
-            <View style={styles.winnerBadge}>
-              <Feather name="award" size={16} color="#FFD700" />
-              <Text style={styles.winnerText}>Winning Bid</Text>
+            <View style={styles.vehicleInfo}>
+              <Feather name="truck" size={16} color="#6C757D" />
+              <Text style={styles.vehicleType}>
+                {bid.auction.vehicle_type
+                  .split('_')
+                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(' ')}
+              </Text>
             </View>
-          )}
-
-          <Text style={styles.description} numberOfLines={2}>
-            {bid.auction.description}
-          </Text>
-
-          <View style={styles.bidInfo}>
-            <View style={styles.bidAmount}>
-              <Feather name="credit-card" size={16} color="#28A745" />
-              <Text style={styles.bidAmountText}>₹{bid.amount}</Text>
-            </View>
-            <Text style={styles.bidTime}>
-              {format(new Date(bid.created_at), 'MMM d, h:mm a')}
-            </Text>
-          </View>
-
-          <View style={styles.vehicleInfo}>
-            <Feather name="truck" size={16} color="#6C757D" />
-            <Text style={styles.vehicleType}>
-              {bid.auction.vehicle_type.split('_').map(word => 
-                word.charAt(0).toUpperCase() + word.slice(1)
-              ).join(' ')}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      );
-    }).filter(Boolean); // Remove null entries from the rendered list
+          </TouchableOpacity>
+        );
+      })
+      .filter(Boolean); // Remove null entries from the rendered list
   };
 
   const renderConsignerAuctions = () => {
@@ -421,7 +430,8 @@ export default function AuctionsScreen() {
           </Text>
           <TouchableOpacity
             style={styles.createButton}
-            onPress={() => router.push('/auctions/create')}>
+            onPress={() => router.push('/auctions/create')}
+          >
             <Text style={styles.createButtonText}>Create Auction</Text>
             <Feather name="plus" size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -433,13 +443,16 @@ export default function AuctionsScreen() {
       <TouchableOpacity
         key={auction.id}
         style={styles.card}
-        onPress={() => router.push(`/auctions/${auction.id}`)}>
+        onPress={() => router.push(`/auctions/${auction.id}`)}
+      >
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{auction.title}</Text>
-          <View style={[
-            styles.statusBadge,
-            { backgroundColor: getAuctionStatusColor(auction) }
-          ]}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getAuctionStatusColor(auction) },
+            ]}
+          >
             <Text style={styles.statusText}>
               {getAuctionStatusText(auction)}
             </Text>
@@ -453,9 +466,10 @@ export default function AuctionsScreen() {
         <View style={styles.vehicleInfo}>
           <Feather name="truck" size={16} color="#6C757D" />
           <Text style={styles.vehicleType}>
-            {auction.vehicle_type.split('_').map(word => 
-              word.charAt(0).toUpperCase() + word.slice(1)
-            ).join(' ')}
+            {auction.vehicle_type
+              .split('_')
+              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ')}
           </Text>
         </View>
 
@@ -465,9 +479,11 @@ export default function AuctionsScreen() {
             {auction.status === 'active' && isPast(new Date(auction.end_time))
               ? `Expired ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
               : auction.status === 'cancelled'
-              ? `Cancelled ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
-              : `Ends ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`
-            }
+              ? `Cancelled ${format(
+                  new Date(auction.end_time),
+                  'MMM d, h:mm a'
+                )}`
+              : `Ends ${format(new Date(auction.end_time), 'MMM d, h:mm a')}`}
           </Text>
         </View>
       </TouchableOpacity>
@@ -479,8 +495,9 @@ export default function AuctionsScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={fetchData} />
-      }>
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+      }
+    >
       <View style={styles.header}>
         <Text style={styles.title}>
           {userRole === 'driver' ? 'Available Jobs' : 'My Auctions'}
@@ -488,7 +505,8 @@ export default function AuctionsScreen() {
         {userRole === 'consigner' && (
           <TouchableOpacity
             style={styles.createButton}
-            onPress={() => router.push('/auctions/create')}>
+            onPress={() => router.push('/auctions/create')}
+          >
             <Text style={styles.createButtonText}>Create Auction</Text>
             <Feather name="plus" size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -498,19 +516,24 @@ export default function AuctionsScreen() {
       {userRole === 'driver' ? (
         <>
           {renderVehicleFilter()}
-          
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>
               Available Jobs ({filteredAuctions.length})
               {selectedVehicleType !== 'all' && (
                 <Text style={styles.filterIndicator}>
-                  {' '}• {VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.label}
+                  {' '}
+                  •{' '}
+                  {
+                    VEHICLE_TYPES.find((v) => v.id === selectedVehicleType)
+                      ?.label
+                  }
                 </Text>
               )}
             </Text>
           </View>
           {renderDriverAuctions()}
-          
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>My Jobs ({bids.length})</Text>
           </View>

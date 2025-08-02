@@ -4,7 +4,6 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';  // ⬅️ storage adapter
 import { createClient } from '@supabase/supabase-js';
-import { Database } from '@/types/supabase';
 
 // Get Supabase configuration from environment variables (works for web & native)
 const supabaseUrl =
@@ -12,8 +11,7 @@ const supabaseUrl =
 const supabaseAnonKey =
   process.env.VITE_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Anon Key:', supabaseAnonKey ? 'Present' : 'Missing');
+// Supabase configuration loaded
 
 // Create a single Supabase client
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
