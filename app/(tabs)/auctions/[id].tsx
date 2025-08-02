@@ -13,43 +13,83 @@ import {
   Linking,
   Modal,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { performanceService } from '@/lib/performanceService';
 import { formatDistanceToNow, isPast } from 'date-fns';
+
+interface Auction {
+  id: string;
+  title: string;
+  description: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  winner_id: string | null;
+  winning_bid_id: string | null;
+  created_at: string | null;
+  created_by: string;
+  vehicle_type: string;
+  consignment_date: string;
+  winner?: {
+    username: string;
+  } | null;
+}
+
+interface Bid {
+  id: string;
+  auction_id: string;
+  user_id: string;
+  amount: number;
+  created_at: string | null;
+  is_winning_bid: boolean | null;
+  bidder?: any;
+}
+
+interface User {
+  id: string;
+  email?: string;
+  username?: string;
+  phone_number?: string | null;
+}
 
 const AuctionDetailsScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
-  const [auction, setAuction] = useState(null);
-  const [bids, setBids] = useState([]);
+  const [auction, setAuction] = useState<Auction | null>(null);
+  const [bids, setBids] = useState<Bid[]>([]);
   const [bidAmount, setBidAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [userRole, setUserRole] = useState(null);
-  const [contactInfo, setContactInfo] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [contactInfo, setContactInfo] = useState<{
+    username: string;
+    phone_number: string | null;
+  } | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [showCancelBidModal, setShowCancelBidModal] = useState(false);
   const [isCancellingBid, setIsCancellingBid] = useState(false);
-  const [userBid, setUserBid] = useState(null);
+  const [userBid, setUserBid] = useState<Bid | null>(null);
   const params = useLocalSearchParams();
-  const isEnded = auction?.end_time ? isPast(new Date(auction.end_time)) : false;
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (user) {
         setCurrentUser(user);
-        
+
         // Get user role
         const { data: profile } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', user.id)
           .single();
-        
+
         if (profile) {
           setUserRole(profile.role);
         }
@@ -58,52 +98,54 @@ const AuctionDetailsScreen = () => {
     fetchUser();
   }, []);
 
-  const checkAndCloseExpiredAuctions = useCallback(async () => {
-    try {
-      // Call the function to check and close expired auctions
-      const { error } = await supabase.rpc('check_and_close_expired_auctions');
-      if (error) {
-        console.error('Error checking expired auctions:', error);
-      }
-    } catch (err) {
-      console.error('Error calling check_and_close_expired_auctions:', err);
-    }
-  }, []);
-
-  const fetchContactInfo = useCallback(async (auctionData) => {
-    if (!auctionData || auctionData.status !== 'completed' || !auctionData.winner_id || !currentUser) {
-      return;
-    }
-
-    try {
-      let contactUserId = null;
-      
-      // Determine whose contact info to fetch based on user role
-      if (userRole === 'consigner' && auctionData.created_by === currentUser.id) {
-        // Consigner viewing their auction - show winner's contact info
-        contactUserId = auctionData.winner_id;
-      } else if (userRole === 'driver' && auctionData.winner_id === currentUser.id) {
-        // Winner driver viewing auction - show consigner's contact info
-        contactUserId = auctionData.created_by;
+  const fetchContactInfo = useCallback(
+    async (auctionData: Auction) => {
+      if (
+        !auctionData ||
+        auctionData.status !== 'completed' ||
+        !auctionData.winner_id ||
+        !currentUser
+      ) {
+        return;
       }
 
-      if (contactUserId) {
-        const { data: contactData, error: contactError } = await supabase
-          .from('profiles')
-          .select('username, phone_number')
-          .eq('id', contactUserId)
-          .single();
+      try {
+        let contactUserId = null;
 
-        if (contactError) {
-          console.error('Error fetching contact info:', contactError);
-        } else {
-          setContactInfo(contactData);
+        // Determine whose contact info to fetch based on user role
+        if (
+          userRole === 'consigner' &&
+          auctionData.created_by === currentUser.id
+        ) {
+          // Consigner viewing their auction - show winner's contact info
+          contactUserId = auctionData.winner_id;
+        } else if (
+          userRole === 'driver' &&
+          auctionData.winner_id === currentUser.id
+        ) {
+          // Winner driver viewing auction - show consigner's contact info
+          contactUserId = auctionData.created_by;
         }
+
+        if (contactUserId) {
+          const { data: contactData, error: contactError } = await supabase
+            .from('profiles')
+            .select('username, phone_number')
+            .eq('id', contactUserId)
+            .single();
+
+          if (contactError) {
+            console.error('Error fetching contact info:', contactError);
+          } else {
+            setContactInfo(contactData);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching contact info:', err);
       }
-    } catch (err) {
-      console.error('Error fetching contact info:', err);
-    }
-  }, [currentUser, userRole]);
+    },
+    [currentUser, userRole]
+  );
 
   const fetchAuctionDetails = useCallback(async () => {
     try {
@@ -112,85 +154,64 @@ const AuctionDetailsScreen = () => {
         return;
       }
 
-      // First, check for expired auctions
-      await checkAndCloseExpiredAuctions();
+      // Use optimized performance service for faster loading
+      const result = await performanceService.getOptimizedAuctionDetails(
+        String(params.id)
+      );
 
-      // Then fetch the auction details
-      const { data: auctionData, error: auctionError } = await supabase
-        .from('auctions')
-        .select(`
-          *,
-          winner:winner_id (
-            username
-          )
-        `)
-        .eq('id', params.id)
-        .maybeSingle();
-
-      if (auctionError) throw auctionError;
-
-      if (!auctionData) {
+      if (!result.auction) {
         setError('Auction not found');
         setAuction(null);
         setBids([]);
         return;
       }
 
-      // Then, fetch the bids separately
-      const { data: bidsData, error: bidsError } = await supabase
-        .from('auction_bids')
-        .select(`
-          *,
-          bidder:user_id (
-            username
-          )
-        `)
-        .eq('auction_id', params.id)
-        .order('amount', { ascending: false });
+      // Convert OptimizedAuction to Auction interface
+      const convertedAuction: Auction = {
+        ...result.auction,
+        created_at: result.auction.start_time,
+        winning_bid_id: null, // Will be updated by database triggers
+        winner: result.auction.winner_id ? { username: 'Winner' } : null,
+      };
 
-      if (bidsError) throw bidsError;
+      setAuction(convertedAuction);
 
-      setAuction(auctionData);
-      setBids(bidsData || []);
+      // Convert OptimizedBid to Bid interface
+      const convertedBids: Bid[] = result.bids.map((bid) => ({
+        ...bid,
+        bidder: { username: bid.bidder_username || 'Anonymous' },
+      }));
+
+      setBids(convertedBids);
+
+      // Set user's bid if exists
+      setUserBid(result.userBid);
+
+      // Fetch contact info for completed auctions
+      await fetchContactInfo(convertedAuction);
       setError(null);
 
-      // Find current user's bid if they are a driver
-      if (currentUser && userRole === 'driver') {
-        const currentUserBid = (bidsData || []).find(bid => bid.user_id === currentUser.id);
-        setUserBid(currentUserBid || null);
-      }
-
-      // Fetch contact info if auction is completed
-      await fetchContactInfo(auctionData);
-
-      // If auction is active but expired, trigger another check
-      if (auctionData.status === 'active' && isPast(new Date(auctionData.end_time))) {
-        setTimeout(() => {
-          checkAndCloseExpiredAuctions().then(() => {
-            // Refetch auction details after closing
-            fetchAuctionDetails();
-          });
-        }, 1000);
-      }
+      // Simple status check - let database triggers handle auction closure
+      // Remove expensive manual auction closure checking
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load auction details');
+      setError(
+        err instanceof Error ? err.message : 'Failed to load auction details'
+      );
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [params.id, checkAndCloseExpiredAuctions, fetchContactInfo, currentUser, userRole]);
+  }, [params.id, fetchContactInfo, currentUser, userRole]);
 
   useEffect(() => {
     fetchAuctionDetails();
-    
-    // Set up an interval to check for expired auctions every 30 seconds
+
+    // Simple refresh interval - let database handle auction closure automatically
     const interval = setInterval(() => {
       if (auction?.status === 'active') {
-        checkAndCloseExpiredAuctions().then(() => {
-          fetchAuctionDetails();
-        });
+        fetchAuctionDetails(); // Just refetch data, no expensive operations
       }
-    }, 30000);
+    }, 60000); // Increased to 60 seconds for better performance
 
     return () => clearInterval(interval);
   }, [fetchAuctionDetails, auction?.status]);
@@ -198,20 +219,28 @@ const AuctionDetailsScreen = () => {
   const handleCancelAuction = async () => {
     try {
       if (!currentUser || !auction) return;
-      
+
       setIsCancelling(true);
-      
+
       // Call the cancellation function based on user role with correct parameter name
-      const method = auction.created_by === currentUser.id ? 'handle_consigner_cancellation' : 'handle_winner_cancellation';
-      const paramName = auction.created_by === currentUser.id ? 'auction_id_param' : 'auction_id';
-      const { error } = await supabase.rpc(method, { [paramName]: params.id });
-      
+      const method =
+        auction.created_by === currentUser.id
+          ? 'handle_consigner_cancellation'
+          : 'handle_winner_cancellation';
+      const paramName =
+        auction.created_by === currentUser.id
+          ? 'auction_id_param'
+          : 'auction_id';
+      const { error } = await (supabase as any).rpc(method, {
+        [paramName]: String(params.id),
+      });
+
       if (error) throw error;
-      
+
       // Close the modal and refresh data
       setShowCancelModal(false);
       await fetchAuctionDetails();
-      
+
       Alert.alert('Success', 'Auction cancelled successfully');
     } catch (error) {
       console.error('Error cancelling auction:', error);
@@ -224,17 +253,19 @@ const AuctionDetailsScreen = () => {
   const handleCancelBid = async () => {
     try {
       if (!currentUser || !userBid) return;
-      
+
       setIsCancellingBid(true);
-      
-      const { error } = await supabase.rpc('cancel_bid', { bid_id_param: userBid.id });
-      
+
+      const { error } = await (supabase as any).rpc('cancel_bid', {
+        bid_id_param: userBid.id,
+      });
+
       if (error) throw error;
-      
+
       // Close the modal and refresh data
       setShowCancelBidModal(false);
       await fetchAuctionDetails();
-      
+
       Alert.alert('Success', 'Your bid has been cancelled successfully');
     } catch (error) {
       console.error('Error cancelling bid:', error);
@@ -245,7 +276,7 @@ const AuctionDetailsScreen = () => {
   };
 
   const handleSubmitBid = async () => {
-    if (!auction || !bidAmount) return;
+    if (!auction || !bidAmount || !currentUser) return;
     try {
       setIsSubmitting(true);
       const amount = parseFloat(bidAmount);
@@ -261,15 +292,59 @@ const AuctionDetailsScreen = () => {
         return;
       }
 
-      const { error: bidError } = await supabase.from('auction_bids').insert([{ 
-        auction_id: auction.id, 
+      // Use optimized bid creation for faster performance
+      const result = await performanceService.createBidOptimized(
+        auction.id,
         amount,
-        user_id: currentUser.id
-      }]);
-      if (bidError) throw bidError;
+        currentUser.id
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to place bid');
+      }
+
+      // Send notifications in background (non-blocking)
+      setTimeout(async () => {
+        try {
+          const { auctionNotificationService } = await import(
+            '@/lib/auctionNotifications'
+          );
+
+          // Get previous highest bidders to notify about being outbid
+          const outbidUsers = bids.filter(
+            (bid) => bid.user_id !== currentUser.id && bid.amount >= amount
+          );
+
+          // Notify auction creator about new bid
+          if (auction.created_by !== currentUser.id) {
+            await auctionNotificationService.notifyNewBid(
+              auction.id,
+              auction.created_by,
+              auction.title,
+              amount
+            );
+          }
+
+          // Notify outbid users
+          for (const bid of outbidUsers) {
+            await auctionNotificationService.notifyOutbid(
+              auction.id,
+              bid.user_id,
+              auction.title,
+              amount
+            );
+          }
+
+          console.log(`✅ Sent notifications for new bid of ₹${amount}`);
+        } catch (notificationError) {
+          console.error('Error sending bid notifications:', notificationError);
+        }
+      }, 100);
+
       setBidAmount('');
       await fetchAuctionDetails();
     } catch (err) {
+      console.error('Error placing bid:', err);
       Alert.alert('Error', 'Failed to place bid');
     } finally {
       setIsSubmitting(false);
@@ -279,7 +354,7 @@ const AuctionDetailsScreen = () => {
   const handleCallContact = () => {
     if (contactInfo?.phone_number) {
       const phoneUrl = `tel:${contactInfo.phone_number}`;
-      Linking.openURL(phoneUrl).catch(err => {
+      Linking.openURL(phoneUrl).catch((err) => {
         console.error('Error opening phone app:', err);
         Alert.alert('Error', 'Unable to open phone app');
       });
@@ -301,7 +376,8 @@ const AuctionDetailsScreen = () => {
     return (
       <TouchableOpacity
         style={styles.cancelButton}
-        onPress={() => setShowCancelModal(true)}>
+        onPress={() => setShowCancelModal(true)}
+      >
         <Feather name="x-circle" size={20} color="#FFFFFF" />
         <Text style={styles.cancelButtonText}>Cancel Auction</Text>
       </TouchableOpacity>
@@ -324,7 +400,8 @@ const AuctionDetailsScreen = () => {
     return (
       <TouchableOpacity
         style={styles.cancelBidButton}
-        onPress={() => setShowCancelBidModal(true)}>
+        onPress={() => setShowCancelBidModal(true)}
+      >
         <Feather name="x-circle" size={20} color="#FFFFFF" />
         <Text style={styles.cancelBidButtonText}>Cancel My Bid</Text>
       </TouchableOpacity>
@@ -336,42 +413,52 @@ const AuctionDetailsScreen = () => {
       visible={showCancelModal}
       transparent={true}
       animationType="fade"
-      onRequestClose={() => setShowCancelModal(false)}>
+      onRequestClose={() => setShowCancelModal(false)}
+    >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Feather name="alert-triangle" size={24} color="#DC3545" />
             <Text style={styles.modalTitle}>Cancel Auction</Text>
           </View>
-          
+
           <Text style={styles.modalMessage}>
-            Are you sure you want to cancel this auction? This action cannot be undone.
+            Are you sure you want to cancel this auction? This action cannot be
+            undone.
           </Text>
-          
+
           {bids.length > 0 && (
             <Text style={styles.modalWarning}>
-              This auction has {bids.length} bid{bids.length > 1 ? 's' : ''}. All bidders will be notified of the cancellation.
+              This auction has {bids.length} bid{bids.length > 1 ? 's' : ''}.
+              All bidders will be notified of the cancellation.
             </Text>
           )}
-          
+
           <View style={styles.modalButtons}>
             <TouchableOpacity
               style={styles.modalCancelButton}
               onPress={() => setShowCancelModal(false)}
-              disabled={isCancelling}>
+              disabled={isCancelling}
+            >
               <Text style={styles.modalCancelButtonText}>Keep Auction</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
-              style={[styles.modalConfirmButton, isCancelling && styles.modalConfirmButtonDisabled]}
+              style={[
+                styles.modalConfirmButton,
+                isCancelling && styles.modalConfirmButtonDisabled,
+              ]}
               onPress={handleCancelAuction}
-              disabled={isCancelling}>
+              disabled={isCancelling}
+            >
               {isCancelling ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
                 <>
                   <Feather name="x-circle" size={16} color="#FFFFFF" />
-                  <Text style={styles.modalConfirmButtonText}>Cancel Auction</Text>
+                  <Text style={styles.modalConfirmButtonText}>
+                    Cancel Auction
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -386,34 +473,41 @@ const AuctionDetailsScreen = () => {
       visible={showCancelBidModal}
       transparent={true}
       animationType="fade"
-      onRequestClose={() => setShowCancelBidModal(false)}>
+      onRequestClose={() => setShowCancelBidModal(false)}
+    >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Feather name="alert-triangle" size={24} color="#DC3545" />
             <Text style={styles.modalTitle}>Cancel Bid</Text>
           </View>
-          
+
           <Text style={styles.modalMessage}>
-            Are you sure you want to cancel your bid of ₹{userBid?.amount}? This action cannot be undone.
+            Are you sure you want to cancel your bid of ₹{userBid?.amount}? This
+            action cannot be undone.
           </Text>
-          
+
           <Text style={styles.modalWarning}>
             The consigner will be notified of your bid cancellation.
           </Text>
-          
+
           <View style={styles.modalButtons}>
             <TouchableOpacity
               style={styles.modalCancelButton}
               onPress={() => setShowCancelBidModal(false)}
-              disabled={isCancellingBid}>
+              disabled={isCancellingBid}
+            >
               <Text style={styles.modalCancelButtonText}>Keep Bid</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
-              style={[styles.modalConfirmButton, isCancellingBid && styles.modalConfirmButtonDisabled]}
+              style={[
+                styles.modalConfirmButton,
+                isCancellingBid && styles.modalConfirmButtonDisabled,
+              ]}
               onPress={handleCancelBid}
-              disabled={isCancellingBid}>
+              disabled={isCancellingBid}
+            >
               {isCancellingBid ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
@@ -430,12 +524,16 @@ const AuctionDetailsScreen = () => {
   );
 
   const renderContactInfo = () => {
-    if (!contactInfo || auction?.status !== 'completed' || !auction?.winner_id) {
+    if (
+      !contactInfo ||
+      auction?.status !== 'completed' ||
+      !auction?.winner_id
+    ) {
       return null;
     }
 
     // Only show contact info to consigner (for winner) or winner (for consigner)
-    const shouldShowContact = 
+    const shouldShowContact =
       (userRole === 'consigner' && auction.created_by === currentUser?.id) ||
       (userRole === 'driver' && auction.winner_id === currentUser?.id);
 
@@ -443,7 +541,8 @@ const AuctionDetailsScreen = () => {
       return null;
     }
 
-    const contactTitle = userRole === 'consigner' ? 'Winner Contact' : 'Consigner Contact';
+    const contactTitle =
+      userRole === 'consigner' ? 'Winner Contact' : 'Consigner Contact';
 
     return (
       <View style={styles.contactSection}>
@@ -457,23 +556,24 @@ const AuctionDetailsScreen = () => {
             {contactInfo.phone_number && (
               <View style={styles.contactRow}>
                 <Feather name="phone" size={20} color="#007AFF" />
-                <Text style={styles.contactPhone}>{contactInfo.phone_number}</Text>
+                <Text style={styles.contactPhone}>
+                  {contactInfo.phone_number}
+                </Text>
               </View>
             )}
           </View>
           {contactInfo.phone_number && (
             <TouchableOpacity
               style={styles.callButton}
-              onPress={handleCallContact}>
+              onPress={handleCallContact}
+            >
               <Feather name="phone" size={20} color="#FFFFFF" />
               <Text style={styles.callButtonText}>Call</Text>
             </TouchableOpacity>
           )}
         </View>
         {!contactInfo.phone_number && (
-          <Text style={styles.noPhoneText}>
-            Phone number not available
-          </Text>
+          <Text style={styles.noPhoneText}>Phone number not available</Text>
         )}
       </View>
     );
@@ -481,10 +581,10 @@ const AuctionDetailsScreen = () => {
 
   const renderAuctionStatus = () => {
     if (!auction) return null;
-    
+
     let statusColor = '#6C757D';
     let statusText = 'Unknown';
-    
+
     if (auction.status === 'active') {
       // Check if auction should be expired
       if (isPast(new Date(auction.end_time))) {
@@ -501,9 +601,9 @@ const AuctionDetailsScreen = () => {
       statusColor = '#DC3545';
       statusText = 'Cancelled';
     }
-    
+
     return (
-      <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>  
+      <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
         <Text style={styles.statusText}>{statusText}</Text>
       </View>
     );
@@ -524,7 +624,9 @@ const AuctionDetailsScreen = () => {
         {bids.map((bid) => (
           <View key={bid.id} style={styles.bidItem}>
             <View style={styles.bidderInfo}>
-              <Text style={styles.bidderName}>{bid.bidder?.username || 'Anonymous'}</Text>
+              <Text style={styles.bidderName}>
+                {bid.bidder?.username || 'Anonymous'}
+              </Text>
               <Text style={styles.bidAmount}>₹{bid.amount}</Text>
             </View>
             {bid.is_winning_bid && (
@@ -541,7 +643,7 @@ const AuctionDetailsScreen = () => {
 
   const renderWinnerSection = () => {
     if (!auction || auction.status === 'active') return null;
-    const winningBid = bids.find(bid => bid.is_winning_bid);
+    const winningBid = bids.find((bid) => bid.is_winning_bid);
     if (!winningBid || !auction.winner) {
       return (
         <View style={styles.noWinnerSection}>
@@ -556,7 +658,9 @@ const AuctionDetailsScreen = () => {
           <Text style={styles.winnerTitle}>Auction Winner</Text>
         </View>
         <View style={styles.winnerCard}>
-          <Text style={styles.winnerName}>{auction.winner.username || 'Unknown Winner'}</Text>
+          <Text style={styles.winnerName}>
+            {auction.winner.username || 'Unknown Winner'}
+          </Text>
           <View style={styles.winningBidAmount}>
             <Text style={styles.winningBidText}>₹{winningBid.amount}</Text>
           </View>
@@ -567,11 +671,10 @@ const AuctionDetailsScreen = () => {
 
   const renderTimeInfo = () => {
     if (!auction) return null;
-    
-    const now = new Date();
+
     const endTime = new Date(auction.end_time);
     const isExpired = isPast(endTime);
-    
+
     if (auction.status === 'active') {
       if (isExpired) {
         return (
@@ -616,7 +719,10 @@ const AuctionDetailsScreen = () => {
     return (
       <View style={styles.errorContainer}>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchAuctionDetails}>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={fetchAuctionDetails}
+        >
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -625,18 +731,19 @@ const AuctionDetailsScreen = () => {
 
   if (!auction) return <Text>Auction not found</Text>;
 
-  const canBid = auction.status === 'active' && !isPast(new Date(auction.end_time));
+  const canBid =
+    auction.status === 'active' && !isPast(new Date(auction.end_time));
 
   return (
     <ScrollView
       style={styles.container}
       refreshControl={
-        <RefreshControl 
-          refreshing={refreshing} 
-          onRefresh={() => { 
-            setRefreshing(true); 
-            fetchAuctionDetails(); 
-          }} 
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            fetchAuctionDetails();
+          }}
         />
       }
     >
@@ -677,7 +784,10 @@ const AuctionDetailsScreen = () => {
               editable={!isSubmitting}
             />
             <TouchableOpacity
-              style={[styles.bidButton, isSubmitting && styles.bidButtonDisabled]}
+              style={[
+                styles.bidButton,
+                isSubmitting && styles.bidButtonDisabled,
+              ]}
               onPress={handleSubmitBid}
               disabled={isSubmitting}
             >

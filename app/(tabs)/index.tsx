@@ -18,7 +18,8 @@ const FEATURES = [
   {
     icon: <Feather name="package" size={24} color="#007AFF" />,
     title: 'Smart Logistics',
-    description: 'Efficient routing and real-time tracking for all your shipments',
+    description:
+      'Efficient routing and real-time tracking for all your shipments',
     highlight: '2,500+ Deliveries',
   },
   {
@@ -45,7 +46,9 @@ export default function HomeScreen() {
   useEffect(() => {
     async function getUserRole() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (user) {
           const { data: profile } = await supabase
             .from('profiles')
@@ -86,23 +89,25 @@ export default function HomeScreen() {
               resizeMode="contain"
             />
           </View>
-          
+
           <Text style={styles.subtitle}>
             Your trusted logistics partner in Guwahati
           </Text>
-          
+
           {!isLoading && userRole === 'consigner' && (
             <View style={styles.actionButtons}>
               <TouchableOpacity
                 style={styles.primaryButton}
-                onPress={handleCreateRequest}>
+                onPress={handleCreateRequest}
+              >
                 <Feather name="plus" size={20} color="#FFFFFF" />
                 <Text style={styles.primaryButtonText}>Create Auction</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={styles.secondaryButton}
-                onPress={handleViewAuctions}>
+                onPress={handleViewAuctions}
+              >
                 <Feather name="list" size={20} color="#007AFF" />
                 <Text style={styles.secondaryButtonText}>View My Auctions</Text>
               </TouchableOpacity>
@@ -112,7 +117,8 @@ export default function HomeScreen() {
           {!isLoading && userRole === 'driver' && (
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={handleViewAuctions}>
+              onPress={handleViewAuctions}
+            >
               <Feather name="search" size={20} color="#FFFFFF" />
               <Text style={styles.primaryButtonText}>Find Jobs</Text>
             </TouchableOpacity>
@@ -130,7 +136,9 @@ export default function HomeScreen() {
                 <Text style={styles.highlightText}>{feature.highlight}</Text>
               </View>
               <Text style={styles.featureTitle}>{feature.title}</Text>
-              <Text style={styles.featureDescription}>{feature.description}</Text>
+              <Text style={styles.featureDescription}>
+                {feature.description}
+              </Text>
             </View>
           ))}
         </View>
@@ -142,17 +150,19 @@ export default function HomeScreen() {
           <View style={styles.quickActionsGrid}>
             <TouchableOpacity
               style={styles.quickActionCard}
-              onPress={handleCreateRequest}>
+              onPress={handleCreateRequest}
+            >
               <Feather name="plus-circle" size={32} color="#007AFF" />
               <Text style={styles.quickActionTitle}>Create New Auction</Text>
               <Text style={styles.quickActionDescription}>
                 Start a new delivery auction
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={styles.quickActionCard}
-              onPress={handleViewAuctions}>
+              onPress={handleViewAuctions}
+            >
               <Feather name="clock" size={32} color="#34C759" />
               <Text style={styles.quickActionTitle}>Active Auctions</Text>
               <Text style={styles.quickActionDescription}>

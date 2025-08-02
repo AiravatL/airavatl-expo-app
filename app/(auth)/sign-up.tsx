@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
   KeyboardAvoidingView,
-  Dimensions,
+  Modal,
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -19,16 +19,32 @@ import { authStorage } from '@/lib/storage';
 
 type UserRole = 'consigner' | 'driver';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
 const VEHICLE_TYPES = [
-  { id: 'all', label: 'All Vehicles', description: 'Can handle any vehicle type' },
-  { id: 'truck', label: 'Truck' },
-  { id: 'lcv', label: 'LCV (Light Commercial Vehicle)' },
-  { id: 'pickup', label: 'Pickup' },
-  { id: 'mini_truck', label: 'Mini Truck' },
-  { id: 'tempo', label: 'Tempo' },
-  { id: 'three_wheeler', label: '3 Wheeler' },
+  {
+    id: 'three_wheeler',
+    label: '3 Wheeler',
+    description: 'Capacity: Up to 500 kg',
+  },
+  {
+    id: 'pickup_truck',
+    label: 'Pickup Truck',
+    description: 'Capacity: Up to 1000 kg',
+  },
+  {
+    id: 'mini_truck',
+    label: 'Mini Truck',
+    description: 'Capacity: Up to 2000 kg',
+  },
+  {
+    id: 'medium_truck',
+    label: 'Medium Truck',
+    description: 'Capacity: Up to 5000 kg',
+  },
+  {
+    id: 'large_truck',
+    label: 'Large Truck',
+    description: 'Capacity: Over 5000 kg',
+  },
 ];
 
 export default function SignUpScreen() {
@@ -43,7 +59,8 @@ export default function SignUpScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const validateEmail = (email: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const validatePassword = (password: string) => password.length >= 6;
   const validatePhoneNumber = (phone: string) => /^[0-9]{10}$/.test(phone);
   const validateVehicleNumber = (vehicleNum: string) => {
@@ -53,14 +70,16 @@ export default function SignUpScreen() {
 
   const showExistingAccountAlert = () => {
     if (Platform.OS === 'web') {
-      setError('An account with this email already exists. Please sign in instead.');
+      setError(
+        'An account with this email already exists. Please sign in instead.'
+      );
     } else {
       Alert.alert(
         'Account Exists',
         'An account with this email already exists. Would you like to sign in instead?',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign In', onPress: () => router.replace('/sign-in') }
+          { text: 'Sign In', onPress: () => router.replace('/sign-in') },
         ]
       );
     }
@@ -92,7 +111,9 @@ export default function SignUpScreen() {
     // Additional validation for drivers
     if (role === 'driver') {
       if (!phoneNumber || !vehicleType || !vehicleNumber) {
-        setError('Phone number, vehicle type, and vehicle number are required for drivers');
+        setError(
+          'Phone number, vehicle type, and vehicle number are required for drivers'
+        );
         return;
       }
 
@@ -109,13 +130,25 @@ export default function SignUpScreen() {
 
     setIsLoading(true);
     try {
-      const { data: { user, session }, error: signUpError } = await supabase.auth.signUp({ 
-        email, 
-        password 
+      const {
+        data: { user, session },
+        error: signUpError,
+      } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            role,
+            username: email.split('@')[0],
+            phone_number: role === 'driver' ? phoneNumber : null,
+            vehicle_type: role === 'driver' ? vehicleType : null,
+            vehicle_number: role === 'driver' ? vehicleNumber : null,
+          },
+        },
       });
 
       if (signUpError) {
-        if (signUpError.message === "User already registered") {
+        if (signUpError.message === 'User already registered') {
           showExistingAccountAlert();
           return;
         } else {
@@ -124,49 +157,78 @@ export default function SignUpScreen() {
         return;
       }
 
-      if (user && session) {
-        // Save session to storage
-        await authStorage.saveSession(session);
+      if (user) {
+        console.log('✅ User created successfully:', user.id);
+        console.log('📱 Session available:', session ? 'Yes' : 'No');
 
-        // Create profile with additional fields for drivers
-        const profileData: any = {
-          id: user.id,
-          username: email.split('@')[0],
-          role,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
+        // With auto-confirmation, we should always get a session
+        if (session) {
+          console.log('💾 Saving session to storage');
+          await authStorage.saveSession(session);
 
-        // Add driver-specific fields
-        if (role === 'driver') {
-          profileData.phone_number = phoneNumber;
-          // Store vehicle info in bio field for now (could be separate table in production)
-          profileData.bio = `Vehicle Type: ${VEHICLE_TYPES.find(v => v.id === vehicleType)?.label}\nVehicle Number: ${vehicleNumber}`;
+          // Wait a moment for the trigger to create the profile
+          setTimeout(async () => {
+            try {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', user.id)
+                .single();
+
+              if (profile) {
+                console.log('✅ Profile found, saving to storage');
+                await authStorage.saveUserProfile(profile);
+              }
+            } catch {
+              console.log(
+                '⏳ Profile not ready yet, will be fetched on next sign in'
+              );
+            }
+          }, 1000);
+
+          Alert.alert(
+            'Success',
+            'Account created successfully! You will be signed in automatically.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  console.log(
+                    '🧭 Sign up complete, navigation will be handled automatically'
+                  );
+                  // Navigation will be handled by useAuth hook
+                },
+              },
+            ]
+          );
+        } else {
+          // This shouldn't happen with auto-confirmation, but handle it just in case
+          console.log('⚠️ No session returned, trying to sign in manually');
+          const { data: signInData, error: signInError } =
+            await supabase.auth.signInWithPassword({
+              email,
+              password,
+            });
+
+          if (signInError || !signInData.session) {
+            Alert.alert(
+              'Account Created',
+              'Your account was created successfully. Please sign in to continue.',
+              [
+                {
+                  text: 'OK',
+                  onPress: () => router.replace('/sign-in'),
+                },
+              ]
+            );
+          } else {
+            await authStorage.saveSession(signInData.session);
+            Alert.alert(
+              'Success',
+              'Account created and signed in successfully!'
+            );
+          }
         }
-
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert(profileData);
-
-        if (profileError) {
-          console.error('Error creating profile:', profileError);
-          await supabase.auth.signOut();
-          await authStorage.clearAll();
-          setError('Failed to create user profile. Please try again.');
-          return;
-        }
-
-        // Save user profile to storage
-        await authStorage.saveUserProfile(profileData);
-
-        Alert.alert(
-          'Success',
-          'Account created successfully!',
-          [{ text: 'OK', onPress: () => {
-            // Navigation will be handled by the auth state change listener
-            console.log('Sign up successful, navigation will be handled automatically');
-          }}]
-        );
       }
     } catch (error) {
       console.error('Signup error:', error);
@@ -180,11 +242,18 @@ export default function SignUpScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false} bounces={false}>
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Create Account</Text>
-          <Text style={styles.headerSubtitle}>Join AiravatL and start your logistics journey</Text>
+          <Text style={styles.headerSubtitle}>
+            Join AiravatL and start your logistics journey
+          </Text>
         </View>
 
         <View style={styles.formContainer}>
@@ -195,7 +264,12 @@ export default function SignUpScreen() {
           )}
 
           <View style={styles.inputContainer}>
-            <Feather name="mail" size={20} color="#6C757D" style={styles.inputIcon} />
+            <Feather
+              name="mail"
+              size={20}
+              color="#6C757D"
+              style={styles.inputIcon}
+            />
             <TextInput
               style={styles.input}
               placeholder="Email"
@@ -208,7 +282,12 @@ export default function SignUpScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Feather name="lock" size={20} color="#6C757D" style={styles.inputIcon} />
+            <Feather
+              name="lock"
+              size={20}
+              color="#6C757D"
+              style={styles.inputIcon}
+            />
             <TextInput
               style={styles.input}
               placeholder="Password"
@@ -220,7 +299,12 @@ export default function SignUpScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Feather name="check-circle" size={20} color="#6C757D" style={styles.inputIcon} />
+            <Feather
+              name="check-circle"
+              size={20}
+              color="#6C757D"
+              style={styles.inputIcon}
+            />
             <TextInput
               style={styles.input}
               placeholder="Confirm Password"
@@ -236,9 +320,10 @@ export default function SignUpScreen() {
             <TouchableOpacity
               style={[
                 styles.roleOption,
-                role === 'consigner' && styles.roleOptionSelected
+                role === 'consigner' && styles.roleOptionSelected,
               ]}
-              onPress={() => setRole('consigner')}>
+              onPress={() => setRole('consigner')}
+            >
               <Feather
                 name="package"
                 size={24}
@@ -248,15 +333,17 @@ export default function SignUpScreen() {
                 <Text
                   style={[
                     styles.roleTitle,
-                    role === 'consigner' && styles.roleTitleSelected
-                  ]}>
+                    role === 'consigner' && styles.roleTitleSelected,
+                  ]}
+                >
                   Consigner
                 </Text>
                 <Text
                   style={[
                     styles.roleDescription,
-                    role === 'consigner' && styles.roleDescriptionSelected
-                  ]}>
+                    role === 'consigner' && styles.roleDescriptionSelected,
+                  ]}
+                >
                   I want to ship goods
                 </Text>
               </View>
@@ -265,9 +352,10 @@ export default function SignUpScreen() {
             <TouchableOpacity
               style={[
                 styles.roleOption,
-                role === 'driver' && styles.roleOptionSelected
+                role === 'driver' && styles.roleOptionSelected,
               ]}
-              onPress={() => setRole('driver')}>
+              onPress={() => setRole('driver')}
+            >
               <Feather
                 name="truck"
                 size={24}
@@ -277,15 +365,17 @@ export default function SignUpScreen() {
                 <Text
                   style={[
                     styles.roleTitle,
-                    role === 'driver' && styles.roleTitleSelected
-                  ]}>
+                    role === 'driver' && styles.roleTitleSelected,
+                  ]}
+                >
                   Driver
                 </Text>
                 <Text
                   style={[
                     styles.roleDescription,
-                    role === 'driver' && styles.roleDescriptionSelected
-                  ]}>
+                    role === 'driver' && styles.roleDescriptionSelected,
+                  ]}
+                >
                   I want to transport goods
                 </Text>
               </View>
@@ -297,9 +387,14 @@ export default function SignUpScreen() {
             <>
               <View style={styles.driverFieldsContainer}>
                 <Text style={styles.driverFieldsTitle}>Driver Information</Text>
-                
+
                 <View style={styles.inputContainer}>
-                  <Feather name="phone" size={20} color="#6C757D" style={styles.inputIcon} />
+                  <Feather
+                    name="phone"
+                    size={20}
+                    color="#6C757D"
+                    style={styles.inputIcon}
+                  />
                   <TextInput
                     style={styles.input}
                     placeholder="Phone Number (10 digits)"
@@ -311,58 +406,108 @@ export default function SignUpScreen() {
                   />
                 </View>
 
-                <View style={styles.dropdownContainer}>
+                <View style={styles.vehicleSelectionContainer}>
                   <TouchableOpacity
-                    style={[styles.inputContainer, styles.dropdownButton]}
-                    onPress={() => setShowVehicleDropdown(!showVehicleDropdown)}>
-                    <Feather name="truck" size={20} color="#6C757D" style={styles.inputIcon} />
-                    <Text style={[styles.dropdownText, !vehicleType && styles.placeholderText]}>
-                      {vehicleType ? VEHICLE_TYPES.find(v => v.id === vehicleType)?.label : 'Select Vehicle Type'}
-                    </Text>
-                    <Feather 
-                      name={showVehicleDropdown ? "chevron-up" : "chevron-down"} 
-                      size={20} 
-                      color="#6C757D" 
+                    style={[styles.inputContainer, styles.vehicleButton]}
+                    onPress={() => setShowVehicleDropdown(true)}
+                  >
+                    <Feather
+                      name="truck"
+                      size={20}
+                      color="#6C757D"
+                      style={styles.inputIcon}
                     />
+                    <Text
+                      style={[
+                        styles.vehicleButtonText,
+                        !vehicleType && styles.placeholderText,
+                      ]}
+                    >
+                      {vehicleType
+                        ? VEHICLE_TYPES.find((v) => v.id === vehicleType)?.label
+                        : 'Select Vehicle Type'}
+                    </Text>
+                    <Feather name="chevron-right" size={20} color="#6C757D" />
                   </TouchableOpacity>
-                  
-                  {showVehicleDropdown && (
-                    <View style={styles.dropdownList}>
-                      {VEHICLE_TYPES.map((vehicle) => (
+                </View>
+
+                {/* Vehicle Selection Modal */}
+                <Modal
+                  visible={showVehicleDropdown}
+                  animationType="slide"
+                  presentationStyle="formSheet"
+                  onRequestClose={() => setShowVehicleDropdown(false)}
+                >
+                  <View style={styles.modalContainer}>
+                    <View style={styles.modalHeader}>
+                      <TouchableOpacity
+                        onPress={() => setShowVehicleDropdown(false)}
+                        style={styles.modalCloseButton}
+                      >
+                        <Feather name="x" size={24} color="#6C757D" />
+                      </TouchableOpacity>
+                      <Text style={styles.modalTitle}>Select Vehicle Type</Text>
+                      <View style={styles.modalHeaderSpacer} />
+                    </View>
+
+                    <ScrollView
+                      style={styles.modalContent}
+                      showsVerticalScrollIndicator={true}
+                      contentContainerStyle={styles.modalScrollContent}
+                      bounces={true}
+                    >
+                      {VEHICLE_TYPES.map((vehicle, index) => (
                         <TouchableOpacity
                           key={vehicle.id}
                           style={[
-                            styles.dropdownItem,
-                            vehicle.id === 'all' && styles.allVehicleItem
+                            styles.modalVehicleItem,
+                            vehicleType === vehicle.id &&
+                              styles.modalVehicleItemSelected,
+                            index === VEHICLE_TYPES.length - 1 &&
+                              styles.lastModalItem,
                           ]}
                           onPress={() => {
                             setVehicleType(vehicle.id);
                             setShowVehicleDropdown(false);
-                          }}>
-                          <View style={styles.dropdownItemContent}>
-                            <Text style={[
-                              styles.dropdownItemText,
-                              vehicle.id === 'all' && styles.allVehicleText
-                            ]}>
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.modalVehicleContent}>
+                            <Text
+                              style={[
+                                styles.modalVehicleTitle,
+                                vehicleType === vehicle.id &&
+                                  styles.modalVehicleTitleSelected,
+                              ]}
+                            >
                               {vehicle.label}
                             </Text>
-                            {vehicle.description && (
-                              <Text style={styles.dropdownItemDescription}>
-                                {vehicle.description}
-                              </Text>
-                            )}
+                            <Text
+                              style={[
+                                styles.modalVehicleDescription,
+                                vehicleType === vehicle.id &&
+                                  styles.modalVehicleDescriptionSelected,
+                              ]}
+                            >
+                              {vehicle.description}
+                            </Text>
                           </View>
-                          {vehicle.id === 'all' && (
-                            <Feather name="star" size={16} color="#007AFF" />
+                          {vehicleType === vehicle.id && (
+                            <Feather name="check" size={20} color="#007AFF" />
                           )}
                         </TouchableOpacity>
                       ))}
-                    </View>
-                  )}
-                </View>
+                    </ScrollView>
+                  </View>
+                </Modal>
 
                 <View style={styles.inputContainer}>
-                  <Feather name="hash" size={20} color="#6C757D" style={styles.inputIcon} />
+                  <Feather
+                    name="hash"
+                    size={20}
+                    color="#6C757D"
+                    style={styles.inputIcon}
+                  />
                   <TextInput
                     style={styles.input}
                     placeholder="Vehicle Number"
@@ -377,9 +522,13 @@ export default function SignUpScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.signUpButton, isLoading && styles.signUpButtonDisabled]}
+            style={[
+              styles.signUpButton,
+              isLoading && styles.signUpButtonDisabled,
+            ]}
             onPress={handleSignUp}
-            disabled={isLoading}>
+            disabled={isLoading}
+          >
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
@@ -410,7 +559,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   scrollContainer: {
-    minHeight: SCREEN_HEIGHT,
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   header: {
     paddingTop: 80,
@@ -531,14 +681,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
-  dropdownContainer: {
-    position: 'relative',
+  vehicleSelectionContainer: {
     marginBottom: 16,
   },
-  dropdownButton: {
+  vehicleButton: {
     backgroundColor: '#FFFFFF',
   },
-  dropdownText: {
+  vehicleButtonText: {
     flex: 1,
     fontSize: 16,
     fontFamily: 'Inter_400Regular',
@@ -548,59 +697,80 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: '#6C757D',
   },
-  dropdownList: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
+  modalContainer: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    zIndex: 1000,
-    maxHeight: 300,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      },
-      default: {
-        elevation: 5,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-      },
-    }),
   },
-  dropdownItem: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 44 : 16,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
   },
-  allVehicleItem: {
-    backgroundColor: '#F0F8FF',
-    borderBottomColor: '#007AFF',
+  modalCloseButton: {
+    padding: 8,
   },
-  dropdownItemContent: {
-    flex: 1,
-  },
-  dropdownItemText: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
     color: '#1C1C1E',
   },
-  allVehicleText: {
+  modalHeaderSpacer: {
+    width: 40,
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  modalScrollContent: {
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 32,
+    flexGrow: 1,
+  },
+  modalVehicleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    marginVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    minHeight: 80,
+  },
+  lastModalItem: {
+    marginBottom: 20,
+  },
+  modalVehicleItemSelected: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
+  },
+  modalVehicleContent: {
+    flex: 1,
+  },
+  modalVehicleTitle: {
+    fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+    marginBottom: 4,
+  },
+  modalVehicleTitleSelected: {
     color: '#007AFF',
   },
-  dropdownItemDescription: {
+  modalVehicleDescription: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     color: '#6C757D',
-    marginTop: 2,
+  },
+  modalVehicleDescriptionSelected: {
+    color: '#5A9FD4',
   },
   signUpButton: {
     flexDirection: 'row',

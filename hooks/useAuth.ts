@@ -24,7 +24,6 @@ export function useAuth() {
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
         
         console.log('📱 Current session from Supabase:', currentSession?.user?.id || 'None');
-        console.log('❌ Session error:', error);
         
         if (currentSession && !error) {
           if (mounted) {
@@ -75,18 +74,25 @@ export function useAuth() {
       console.log('🔄 Auth state change:', event, currentSession?.user?.id || 'None');
 
       try {
-        if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        if (event === 'SIGNED_OUT') {
           console.log('👋 User signed out');
           await authStorage.clearAll();
           setSession(null);
+          setIsLoading(false);
+          setIsInitialized(true);
         } else if (event === 'SIGNED_IN' && currentSession?.user?.id) {
           console.log('👋 User signed in:', currentSession.user.id);
           await authStorage.saveSession(currentSession);
+          console.log('✅ Setting session and completing initialization');
           setSession(currentSession);
+          setIsLoading(false);
+          setIsInitialized(true);
         } else if (event === 'TOKEN_REFRESHED' && currentSession) {
           console.log('🔄 Token refreshed');
           await authStorage.saveSession(currentSession);
           setSession(currentSession);
+          setIsLoading(false);
+          setIsInitialized(true);
         }
       } catch (error) {
         console.error('❌ Error handling auth state change:', error);

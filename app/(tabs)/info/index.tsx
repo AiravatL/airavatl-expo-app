@@ -1,5 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -9,9 +15,10 @@ export default function InfoScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.card}
-          onPress={() => router.push('/info/privacy')}>
+          onPress={() => router.push('/info/privacy')}
+        >
           <Feather name="shield" size={24} color="#007AFF" />
           <View style={styles.cardContent}>
             <Text style={styles.cardTitle}>Privacy Policy</Text>
@@ -21,9 +28,10 @@ export default function InfoScreen() {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.card}
-          onPress={() => router.push('/info/about')}>
+          onPress={() => router.push('/info/about')}
+        >
           <Feather name="info" size={24} color="#34C759" />
           <View style={styles.cardContent}>
             <Text style={styles.cardTitle}>About Us</Text>
@@ -33,9 +41,10 @@ export default function InfoScreen() {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.card}
-          onPress={() => router.push('/info/contact')}>
+          onPress={() => router.push('/info/contact')}
+        >
           <Feather name="mail" size={24} color="#5856D6" />
           <View style={styles.cardContent}>
             <Text style={styles.cardTitle}>Contact Us</Text>
