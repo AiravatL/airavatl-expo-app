@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import {
   useFonts,
@@ -11,6 +12,9 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { View, ActivityIndicator } from 'react-native';
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -46,6 +50,11 @@ export default function RootLayout() {
       });
       return;
     }
+
+    // Hide splash screen when everything is ready
+    SplashScreen.hideAsync().catch((error) => {
+      console.warn('Failed to hide splash screen:', error);
+    });
 
     // Add a small delay to ensure the component is fully mounted
     const timer = setTimeout(() => {
