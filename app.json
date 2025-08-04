@@ -24,13 +24,15 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.airavatl.app",
-      "versionCode": 2,
       "permissions": [
         "INTERNET",
         "CAMERA",
         "RECORD_AUDIO",
         "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE"
+        "READ_EXTERNAL_STORAGE",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK"
       ]
     },
     "web": {

@@ -8,7 +8,6 @@ import {
   RefreshControl,
   ActivityIndicator,
   Platform,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -128,11 +127,6 @@ export default function AuctionsScreen() {
     } catch (error) {
       console.error('Error fetching data:', error);
       setError('Failed to load data. Please try again.');
-
-      // Handle error appropriately
-      if (__DEV__ && error instanceof Error) {
-        Alert.alert('Debug Error', error.message);
-      }
     } finally {
       setIsLoading(false);
       setRefreshing(false);

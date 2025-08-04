@@ -274,7 +274,7 @@ class AuctionNotificationService {
       // Filter drivers by vehicle type and push token availability
       const driversWithTokens = drivers.filter(d => d.push_token);
 
-      // Log statistics for monitoring (remove in production if not needed)
+      // Log statistics for monitoring (in development only)
       if (__DEV__) {
         console.log(`Found ${drivers.length} drivers to notify about new auction (vehicle: ${vehicleType})`);
         console.log(`Drivers with matching vehicle type: ${drivers.filter(d => d.vehicle_type === vehicleType).length}`);

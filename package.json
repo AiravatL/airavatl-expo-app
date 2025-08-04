@@ -5,14 +5,19 @@
   "private": true,
   "scripts": {
     "lint": "expo lint",
-    "test": "echo test ok",
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "dev": "EXPO_NO_TELEMETRY=1 NODE_OPTIONS='--max-old-space-size=4096' expo start --clear",
     "tunnel": "EXPO_NO_TELEMETRY=1 NODE_OPTIONS='--max-old-space-size=4096' expo start --tunnel",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "build:android:preview": "eas build --platform android --profile preview",
+    "build:android:production": "eas build --platform android --profile production",
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:ios:production": "eas build --platform ios --profile production",
+    "secrets:setup": "echo 'Setting up EAS secrets...' && eas env:create --scope project --name SUPABASE_URL --value 'https://kastxdwqrcctbeawscoz.supabase.co' && eas env:create --scope project --name SUPABASE_ANON_KEY --value 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imthc3R4ZHdxcmNjdGJlYXdzY296Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQxMjY3NDUsImV4cCI6MjA2OTcwMjc0NX0.73QBqNMBXS_WJMmVeBgNRAFrnmxgIJNop2wOJ5gDqwI'",
+    "secrets:list": "eas env:list"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.2.3",
@@ -23,6 +28,7 @@
     "@react-navigation/native": "^7.1.6",
     "@supabase/supabase-js": "^2.39.3",
     "date-fns": "^3.3.1",
+    "dotenv": "^17.2.1",
     "expo": "53.0.20",
     "expo-blur": "~14.1.5",
     "expo-camera": "~16.1.11",

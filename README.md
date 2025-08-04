@@ -15,7 +15,6 @@ A React Native + Expo application for the AiravatL logistics platform.
 git clone https://github.com/AiravatL/airavatl-expo-app.git
 cd airavatl-expo-app
 git checkout dev
-corepack enable          # enables pnpm
 npm install
 npm start               # runs `expo start`
 ```

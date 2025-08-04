@@ -41,6 +41,9 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
         // In Expo Go, this is expected
         if (Constants.appOwnership === 'expo') {
           setError('Push notifications have limitations in Expo Go. Build a development build for full functionality.');
+        } else {
+          // In production builds, this is unexpected
+          setError('Failed to register for push notifications. Please try again.');
         }
       }
     } catch (err) {
@@ -48,7 +51,9 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
       setError(errorMessage);
       // Don't show error to user in development - it's expected in Expo Go
       if (!__DEV__ || Constants.appOwnership !== 'expo') {
-        console.error('Push notification error:', err);
+        if (__DEV__) {
+          console.error('Push notification error:', err);
+        }
       }
     } finally {
       setIsLoading(false);

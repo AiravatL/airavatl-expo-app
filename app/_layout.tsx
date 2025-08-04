@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -11,12 +11,14 @@ import {
 } from '@expo-google-fonts/inter';
 import { useAuth } from '@/hooks/useAuth';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  const [initError, setInitError] = useState<string | null>(null);
+
   useFrameworkReady();
 
   const [fontsLoaded] = useFonts({
@@ -33,7 +35,9 @@ export default function RootLayout() {
     if (session?.user?.id) {
       // Don't block app loading if push notifications fail
       registerForPushNotifications().catch((error) => {
-        console.warn('Push notification setup failed:', error);
+        if (__DEV__) {
+          console.warn('Push notification setup failed:', error);
+        }
         // Continue app loading normally
       });
     }
@@ -43,11 +47,13 @@ export default function RootLayout() {
   useEffect(() => {
     // Only navigate after fonts are loaded, auth is initialized, and not loading
     if (!fontsLoaded || !isInitialized || isLoading) {
-      console.log('⏳ Not ready for navigation yet:', {
-        fontsLoaded,
-        isInitialized,
-        isLoading,
-      });
+      if (__DEV__) {
+        console.log('⏳ Not ready for navigation yet:', {
+          fontsLoaded,
+          isInitialized,
+          isLoading,
+        });
+      }
       return;
     }
 
@@ -59,20 +65,29 @@ export default function RootLayout() {
     // Add a small delay to ensure the component is fully mounted
     const timer = setTimeout(() => {
       try {
-        console.log(
-          '🧭 Navigation check - Session:',
-          session?.user?.id || 'None'
-        );
+        if (__DEV__) {
+          console.log(
+            '🧭 Navigation check - Session:',
+            session?.user?.id || 'None'
+          );
+        }
 
         if (session?.user?.id) {
-          console.log('🧭 Navigating to tabs');
+          if (__DEV__) {
+            console.log('🧭 Navigating to tabs');
+          }
           router.replace('/(tabs)');
         } else {
-          console.log('🧭 Navigating to sign-in');
+          if (__DEV__) {
+            console.log('🧭 Navigating to sign-in');
+          }
           router.replace('/(auth)/sign-in');
         }
       } catch (error) {
-        console.error('❌ Navigation error:', error);
+        if (__DEV__) {
+          console.error('❌ Navigation error:', error);
+        }
+        setInitError('Navigation failed. Please restart the app.');
         // Fallback navigation
         if (session?.user?.id) {
           router.replace('/(tabs)');
@@ -84,6 +99,25 @@ export default function RootLayout() {
 
     return () => clearTimeout(timer);
   }, [fontsLoaded, session, isInitialized, isLoading]);
+
+  // Show error screen if initialization failed
+  if (initError) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: '#007AFF',
+          padding: 20,
+        }}
+      >
+        <Text style={{ color: '#FFFFFF', textAlign: 'center', fontSize: 16 }}>
+          {initError}
+        </Text>
+      </View>
+    );
+  }
 
   // Show loading screen while fonts or auth are loading
   if (!fontsLoaded || !isInitialized || isLoading) {
@@ -106,14 +140,6 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="debug-notifications"
-          options={{
-            headerShown: true,
-            title: 'Debug Notifications',
-            presentation: 'modal',
-          }}
-        />
         <Stack.Screen name="+not-found" options={{ presentation: 'modal' }} />
       </Stack>
       <StatusBar style="auto" />

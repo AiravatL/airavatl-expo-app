@@ -18,31 +18,43 @@ export function useAuth() {
 
     async function initializeAuth() {
       try {
-        console.log('🔄 Initializing auth...');
+        if (__DEV__) {
+          console.log('🔄 Initializing auth...');
+        }
         
         // First, check current session from Supabase
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
         
-        console.log('📱 Current session from Supabase:', currentSession?.user?.id || 'None');
+        if (__DEV__) {
+          console.log('📱 Current session from Supabase:', currentSession?.user?.id || 'None');
+        }
         
         if (currentSession && !error) {
           if (mounted) {
-            console.log('✅ Valid session found, setting session');
+            if (__DEV__) {
+              console.log('✅ Valid session found, setting session');
+            }
             setSession(currentSession);
             await authStorage.saveSession(currentSession);
           }
         } else {
           // Try to get stored session as fallback
           const storedSession = await authStorage.getSession();
-          console.log('💾 Stored session:', storedSession?.user?.id || 'None');
+          if (__DEV__) {
+            console.log('💾 Stored session:', storedSession?.user?.id || 'None');
+          }
           
           if (storedSession && await authStorage.isSessionValid(storedSession)) {
-            console.log('✅ Valid stored session found');
+            if (__DEV__) {
+              console.log('✅ Valid stored session found');
+            }
             if (mounted) {
               setSession(storedSession);
             }
           } else {
-            console.log('❌ No valid session found, clearing storage');
+            if (__DEV__) {
+              console.log('❌ No valid session found, clearing storage');
+            }
             await authStorage.clearAll();
             if (mounted) {
               setSession(null);
@@ -51,7 +63,12 @@ export function useAuth() {
         }
       } catch (error) {
         console.error('❌ Auth initialization error:', error);
-        await authStorage.clearAll();
+        // Don't crash the app due to auth errors - just clear storage and continue
+        try {
+          await authStorage.clearAll();
+        } catch (storageError) {
+          console.error('❌ Storage clear error:', storageError);
+        }
         if (mounted) {
           setSession(null);
         }
