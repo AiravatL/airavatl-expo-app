@@ -19,8 +19,9 @@
       "bundleIdentifier": "com.airavatl.app"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "googleServicesFile": "./google-services.json",
+        
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
         
