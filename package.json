@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
+    "prepare": "npx expo-doctor",
     "lint": "expo lint",
     "start": "expo start --dev-client",
     "android": "expo run:android",
