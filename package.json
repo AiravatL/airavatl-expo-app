@@ -15,8 +15,8 @@
     "build:android:preview": "eas build --platform android --profile preview",
     "build:android:production": "eas build --platform android --profile production",
     "build:ios:preview": "eas build --platform ios --profile preview",
-    "build:ios:production": "eas build --platform ios --profile production",
-    "secrets:list": "eas env:list"
+    "build:ios:production": "eas build --platform ios --profile production"
+   
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.2.3",
