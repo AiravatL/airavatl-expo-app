@@ -12,7 +12,7 @@ ios/Pods/
 .env.*.local
 *.jks
 *.keystore
-
+google-services.json
 # misc
 .DS_Store
 .idea/

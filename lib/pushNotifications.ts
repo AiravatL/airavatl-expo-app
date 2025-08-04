@@ -27,8 +27,11 @@ export interface PushNotificationService {
 class PushNotificationServiceImpl implements PushNotificationService {
   async registerForPushNotificationsAsync(): Promise<string | undefined> {
     try {
-      // In Expo Go, push notifications have limitations
+      // Push notifications require a physical device
       if (!Device.isDevice) {
+        if (__DEV__) {
+          console.log('ℹ️ Push notifications require a physical device');
+        }
         return undefined;
       }
 
@@ -65,14 +68,21 @@ class PushNotificationServiceImpl implements PushNotificationService {
       }
       
       if (finalStatus !== 'granted') {
-        return undefined; // Don't throw error, just return undefined
+        if (__DEV__) {
+          console.log('ℹ️ Push notification permissions not granted');
+        }
+        return undefined;
       }
 
       // Get the push token with better error handling
       try {
+        // Use EAS project ID from environment, with secure fallback
         const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? 
-                         Constants.easConfig?.projectId ??
-                         '34fdc681-b1ea-4ea4-afac-90495ca8e9e4'; // Fallback to known project ID
+                         Constants.easConfig?.projectId;
+        
+        if (!projectId) {
+          throw new Error('Project ID not found in app configuration. Please ensure EAS_PROJECT_ID is set in build environment.');
+        }
         
         if (__DEV__) {
           console.log('🔍 Project ID for push notifications:', projectId);
@@ -83,31 +93,43 @@ class PushNotificationServiceImpl implements PushNotificationService {
           projectId: projectId,
         });
         
+        if (!tokenData.data) {
+          throw new Error('Failed to generate push token - no token data returned');
+        }
+        
         if (__DEV__) {
-          console.log('✅ Push token generated:', tokenData.data);
+          console.log('✅ Push token generated successfully');
         }
         return tokenData.data;
       } catch (tokenError) {
         if (__DEV__) {
           console.error('❌ Token generation failed:', tokenError);
         }
-        // In development/Expo Go, this is expected to fail sometimes
+        
+        // In Expo Go, token generation often fails - this is expected
         if (Constants.appOwnership === 'expo') {
           if (__DEV__) {
-            console.log('ℹ️ Token generation failed in Expo Go (expected)');
+            console.log('ℹ️ Token generation failed in Expo Go (this is normal in development)');
           }
           return undefined;
         }
-        // In production builds, re-throw the error
-        throw tokenError;
+        
+        // In production builds, this indicates a configuration issue
+        throw new Error(`Push token generation failed: ${tokenError instanceof Error ? tokenError.message : 'Unknown error'}. Please check Firebase/FCM configuration.`);
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error in push notification setup';
+      
       if (__DEV__) {
-        console.error('Push notification registration failed:', error);
+        console.error('Push notification registration failed:', errorMessage);
       }
-      // In production builds, don't silently fail - throw the error
-      // so it can be handled by the caller
-      throw error;
+      
+      // In production builds, we need to surface configuration errors
+      if (Constants.appOwnership !== 'expo') {
+        throw new Error(`Push notification setup failed: ${errorMessage}`);
+      }
+      
+      return undefined;
     }
   }
 

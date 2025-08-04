@@ -33,27 +33,49 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
         setExpoPushToken(token);
         
         // Save token to database if user is authenticated
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError) {
+          console.error('Error getting user for push token save:', userError);
+          setError('Failed to get user session. Push notifications may not work properly.');
+          return;
+        }
+        
         if (user) {
-          await pushNotificationService.savePushTokenToDatabase(token, user.id);
+          try {
+            await pushNotificationService.savePushTokenToDatabase(token, user.id);
+            if (__DEV__) {
+              console.log('✅ Push token saved to database successfully');
+            }
+          } catch (dbError) {
+            console.error('Error saving push token to database:', dbError);
+            setError('Push token generated but failed to save to database. Some notifications may not work.');
+          }
+        } else {
+          setError('No user session found. Please sign in to enable push notifications.');
         }
       } else {
-        // In Expo Go, this is expected
+        // Handle cases where token generation returns undefined
         if (Constants.appOwnership === 'expo') {
           setError('Push notifications have limitations in Expo Go. Build a development build for full functionality.');
         } else {
-          // In production builds, this is unexpected
-          setError('Failed to register for push notifications. Please try again.');
+          setError('Failed to register for push notifications. Please check your device settings and try again.');
         }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to register for push notifications';
       setError(errorMessage);
-      // Don't show error to user in development - it's expected in Expo Go
-      if (!__DEV__ || Constants.appOwnership !== 'expo') {
-        if (__DEV__) {
-          console.error('Push notification error:', err);
-        }
+      
+      // Log detailed error in development
+      if (__DEV__) {
+        console.error('Push notification registration error:', err);
+      }
+      
+      // Don't show technical errors to users in production
+      if (Constants.appOwnership !== 'expo' && !__DEV__) {
+        // In production, show user-friendly message but log technical details
+        console.error('Push notification setup failed:', err);
+        setError('Failed to set up push notifications. Please try again or contact support if the problem persists.');
       }
     } finally {
       setIsLoading(false);
