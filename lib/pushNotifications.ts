@@ -78,7 +78,8 @@ class PushNotificationServiceImpl implements PushNotificationService {
       try {
         // Use EAS project ID from environment, with secure fallback
         const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? 
-                         Constants.easConfig?.projectId;
+                         Constants.easConfig?.projectId ??
+                         process.env.EAS_PROJECT_ID;
         
         if (!projectId) {
           throw new Error('Project ID not found in app configuration. Please ensure EAS_PROJECT_ID is set in build environment.');
