@@ -1,0 +1,69 @@
+// app.config.js
+export default {
+  expo: {
+    name: 'AiravatL',
+    slug: 'airavatl-efuh5yckuaxsfb5ueygzd',
+    orientation: 'portrait',
+    icon: './assets/images/icon.png',
+    scheme: 'airavatl',
+    userInterfaceStyle: 'automatic',
+    splash: {
+      image: './assets/images/icon.png',
+      resizeMode: 'contain',
+      backgroundColor: '#ffffff',
+    },
+    assetBundlePatterns: ['**/*'],
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: 'com.airavatl.app',
+    },
+    android: {
+      package: 'com.airavatl.app',
+      // EAS injects the file-secret here; locally we fall back:
+      googleServicesFile:
+        process.env.GOOGLE_SERVICES_JSON
+        ?? './google-services.json',
+      adaptiveIcon: {
+        foregroundImage: './assets/images/icon.png',
+        backgroundColor: '#ffffff',
+      },
+      permissions: [
+        'INTERNET',
+        'CAMERA',
+        'RECORD_AUDIO',
+        'WRITE_EXTERNAL_STORAGE',
+        'READ_EXTERNAL_STORAGE',
+        'VIBRATE',
+        'RECEIVE_BOOT_COMPLETED',
+        'WAKE_LOCK',
+      ],
+    },
+    web: {
+      bundler: 'metro',
+      favicon: './assets/images/favicon.png',
+    },
+    plugins: [
+      'expo-router',
+      [
+        'expo-notifications',
+        {
+          icon: './assets/images/icon.png',
+          color: '#ffffff',
+          defaultChannel: 'default',
+        },
+      ],
+    ],
+    experiments: {
+      typedRoutes: true,
+      tsconfigPaths: true,
+    },
+    sdkVersion: '53.0.0',
+    extra: {
+      router: {},
+      eas: {
+        projectId: '34fdc681-b1ea-4ea4-afac-90495ca8e9e4',
+      },
+    },
+    owner: 'vishalkalita',
+  },
+};
