@@ -6,6 +6,7 @@ android/.gradle/
 ios/Pods/
 /android
 /ios
+.eas
 
 # secrets & credentials
 .env
@@ -13,7 +14,6 @@ ios/Pods/
 .env.*.local
 *.jks
 *.keystore
-google-services.json
 GoogleService-Info.plist
 
 # misc
