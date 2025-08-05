@@ -167,8 +167,8 @@ export default function CreateAuctionScreen() {
             vehicleType,
             parseFloat(weight)
           );
-        } catch (notificationError) {
-          console.error('Background notification error:', notificationError);
+        } catch {
+          // Silently handle notification errors in production
         }
       }, 100); // Small delay to ensure UI updates first
 

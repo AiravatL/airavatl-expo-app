@@ -355,7 +355,6 @@ class DataService {
   async checkExpiredAuctions(): Promise<void> {
     // Remove expensive RPC call - let database triggers handle this automatically
     // The new database triggers will automatically update auction status
-    console.log('Auction status updates are now handled automatically by database triggers');
   }
 
   // Force refresh all data for a user

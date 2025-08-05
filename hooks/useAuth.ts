@@ -18,31 +18,18 @@ export function useAuth() {
 
     async function initializeAuth() {
       try {
-        if (__DEV__) {
-          console.log('🔄 Initializing auth...');
-        }
         
         // First, check current session from Supabase
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
         
-        if (__DEV__) {
-          console.log('📱 Current session from Supabase:', currentSession?.user?.id || 'None');
-        }
-        
         if (currentSession && !error) {
           if (mounted) {
-            if (__DEV__) {
-              console.log('✅ Valid session found, setting session');
-            }
             setSession(currentSession);
             await authStorage.saveSession(currentSession);
           }
         } else {
           // Try to get stored session as fallback
           const storedSession = await authStorage.getSession();
-          if (__DEV__) {
-            console.log('💾 Stored session:', storedSession?.user?.id || 'None');
-          }
           
           if (storedSession && await authStorage.isSessionValid(storedSession)) {
             if (__DEV__) {
@@ -52,29 +39,24 @@ export function useAuth() {
               setSession(storedSession);
             }
           } else {
-            if (__DEV__) {
-              console.log('❌ No valid session found, clearing storage');
-            }
             await authStorage.clearAll();
             if (mounted) {
               setSession(null);
             }
           }
         }
-      } catch (error) {
-        console.error('❌ Auth initialization error:', error);
+      } catch {
         // Don't crash the app due to auth errors - just clear storage and continue
         try {
           await authStorage.clearAll();
-        } catch (storageError) {
-          console.error('❌ Storage clear error:', storageError);
+        } catch {
+          // Silently handle storage errors
         }
         if (mounted) {
           setSession(null);
         }
       } finally {
         if (mounted) {
-          console.log('✅ Auth initialization complete');
           setIsLoading(false);
           setIsInitialized(true);
         }
@@ -88,31 +70,25 @@ export function useAuth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!mounted) return;
 
-      console.log('🔄 Auth state change:', event, currentSession?.user?.id || 'None');
-
       try {
         if (event === 'SIGNED_OUT') {
-          console.log('👋 User signed out');
           await authStorage.clearAll();
           setSession(null);
           setIsLoading(false);
           setIsInitialized(true);
         } else if (event === 'SIGNED_IN' && currentSession?.user?.id) {
-          console.log('👋 User signed in:', currentSession.user.id);
           await authStorage.saveSession(currentSession);
-          console.log('✅ Setting session and completing initialization');
           setSession(currentSession);
           setIsLoading(false);
           setIsInitialized(true);
         } else if (event === 'TOKEN_REFRESHED' && currentSession) {
-          console.log('🔄 Token refreshed');
           await authStorage.saveSession(currentSession);
           setSession(currentSession);
           setIsLoading(false);
           setIsInitialized(true);
         }
-      } catch (error) {
-        console.error('❌ Error handling auth state change:', error);
+      } catch {
+        // Silently handle auth state change errors
       }
     });
 

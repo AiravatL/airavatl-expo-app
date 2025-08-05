@@ -29,9 +29,6 @@ class PushNotificationServiceImpl implements PushNotificationService {
     try {
       // Push notifications require a physical device
       if (!Device.isDevice) {
-        if (__DEV__) {
-          console.log('ℹ️ Push notifications require a physical device');
-        }
         return undefined;
       }
 
@@ -68,9 +65,6 @@ class PushNotificationServiceImpl implements PushNotificationService {
       }
       
       if (finalStatus !== 'granted') {
-        if (__DEV__) {
-          console.log('ℹ️ Push notification permissions not granted');
-        }
         return undefined;
       }
 
@@ -85,11 +79,6 @@ class PushNotificationServiceImpl implements PushNotificationService {
           throw new Error('Project ID not found in app configuration. Please ensure EAS_PROJECT_ID is set in build environment.');
         }
         
-        if (__DEV__) {
-          console.log('🔍 Project ID for push notifications:', projectId);
-          console.log('🔍 App ownership:', Constants.appOwnership);
-        }
-        
         const tokenData = await Notifications.getExpoPushTokenAsync({
           projectId: projectId,
         });
@@ -98,20 +87,10 @@ class PushNotificationServiceImpl implements PushNotificationService {
           throw new Error('Failed to generate push token - no token data returned');
         }
         
-        if (__DEV__) {
-          console.log('✅ Push token generated successfully');
-        }
         return tokenData.data;
       } catch (tokenError) {
-        if (__DEV__) {
-          console.error('❌ Token generation failed:', tokenError);
-        }
-        
         // In Expo Go, token generation often fails - this is expected
         if (Constants.appOwnership === 'expo') {
-          if (__DEV__) {
-            console.log('ℹ️ Token generation failed in Expo Go (this is normal in development)');
-          }
           return undefined;
         }
         
@@ -120,10 +99,6 @@ class PushNotificationServiceImpl implements PushNotificationService {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error in push notification setup';
-      
-      if (__DEV__) {
-        console.error('Push notification registration failed:', errorMessage);
-      }
       
       // In production builds, we need to surface configuration errors
       if (Constants.appOwnership !== 'expo') {
@@ -179,15 +154,9 @@ class PushNotificationServiceImpl implements PushNotificationService {
       const result = await response.json();
 
       if (result.errors) {
-        if (__DEV__) {
-          console.error('Push notification errors:', result.errors);
-        }
         throw new Error(result.errors[0]?.message || 'Failed to send push notification');
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error('Error sending push notification:', error);
-      }
       throw error;
     }
   }

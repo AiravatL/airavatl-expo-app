@@ -64,8 +64,6 @@ export default function AuctionsScreen() {
       setUserRole(profile.role as UserRole);
 
       if (profile.role === 'driver') {
-        console.log('Fetching auctions for driver...');
-
         // Use optimized performance service for faster loading
         const vehicleTypeFilter =
           selectedVehicleType === 'all' ? undefined : selectedVehicleType;
@@ -124,8 +122,7 @@ export default function AuctionsScreen() {
         const userAuctions = await dataService.getUserAuctions(user.id, true); // Force refresh
         setAuctions(userAuctions);
       }
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    } catch {
       setError('Failed to load data. Please try again.');
     } finally {
       setIsLoading(false);

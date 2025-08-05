@@ -29,12 +29,8 @@ if (supabaseUrl.includes('$') || supabaseUrl === 'your_supabase_url_here') {
 }
 
 if (supabaseAnonKey.includes('$') || supabaseAnonKey === 'your_supabase_anon_key_here') {
-  console.error('Invalid Supabase Anon Key detected');
   throw new Error('Supabase Anon Key contains placeholder values. Please check your environment configuration.');
 }
-
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Anon Key:', supabaseAnonKey ? 'Present' : 'Missing');
 
 // Create a single Supabase client
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {

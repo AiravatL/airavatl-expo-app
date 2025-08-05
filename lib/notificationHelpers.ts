@@ -16,10 +16,6 @@ export interface NotificationData {
 export const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
   const data = response.notification.request.content.data as NotificationData;
   
-  if (__DEV__) {
-    console.log('Notification tapped:', data);
-  }
-  
   try {
     switch (data.type) {
       case 'auction_won':
@@ -44,8 +40,7 @@ export const handleNotificationResponse = (response: Notifications.NotificationR
         router.push('/(tabs)/auctions');
         break;
     }
-  } catch (error) {
-    console.error('Error handling notification navigation:', error);
+  } catch {
     // Fallback to main screen
     router.push('/(tabs)');
   }
@@ -57,11 +52,8 @@ export const handleNotificationResponse = (response: Notifications.NotificationR
 export const clearAllNotifications = async () => {
   try {
     await Notifications.dismissAllNotificationsAsync();
-    if (__DEV__) {
-      console.log('All notifications cleared');
-    }
-  } catch (error) {
-    console.error('Error clearing notifications:', error);
+  } catch {
+    // Silently handle errors
   }
 };
 
@@ -71,8 +63,7 @@ export const clearAllNotifications = async () => {
 export const getBadgeCount = async (): Promise<number> => {
   try {
     return await Notifications.getBadgeCountAsync();
-  } catch (error) {
-    console.error('Error getting badge count:', error);
+  } catch {
     return 0;
   }
 };
@@ -83,8 +74,8 @@ export const getBadgeCount = async (): Promise<number> => {
 export const setBadgeCount = async (count: number) => {
   try {
     await Notifications.setBadgeCountAsync(count);
-  } catch (error) {
-    console.error('Error setting badge count:', error);
+  } catch {
+    // Silently handle errors
   }
 };
 

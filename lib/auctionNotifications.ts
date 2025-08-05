@@ -21,16 +21,16 @@ class AuctionNotificationService {
         .single();
 
       if (error || !profile) {
-        console.error(`Failed to get user role for ${userId}:`, error);
         return null;
       }
 
       return profile.role as 'consigner' | 'driver';
-    } catch (error) {
-      console.error(`Error fetching user role for ${userId}:`, error);
+    } catch {
       return null;
     }
   }
+
+  // Test function to send a notification directly - REMOVED FOR PRODUCTION
 
   // Send notification to a specific user with role validation
   async sendNotificationToUser(
@@ -59,7 +59,6 @@ class AuctionNotificationService {
       });
 
       if (dbError) {
-        console.error(`Failed to save notification to database for user ${userId}:`, dbError);
         return;
       }
 
@@ -86,8 +85,8 @@ class AuctionNotificationService {
       );
 
       // Notification sent successfully
-    } catch (error) {
-      console.error(`Error sending notification to user ${userId}:`, error);
+    } catch {
+      // Silently handle errors in production
     }
   }
 
@@ -119,7 +118,6 @@ class AuctionNotificationService {
         .eq('auction_id', auctionId);
 
       if (error || !bidders) {
-        console.error('Error fetching bidders:', error);
         return;
       }
 
@@ -140,8 +138,8 @@ class AuctionNotificationService {
           'driver' // Only drivers place bids
         );
       }
-    } catch (error) {
-      console.error('Error notifying auction ended:', error);
+    } catch {
+      // Silently handle errors in production
     }
   }
 
@@ -157,7 +155,7 @@ class AuctionNotificationService {
     await this.sendNotificationToUser(
       outbidUserId,
       '📢 You\'ve been outbid!',
-      `Someone placed a higher bid ($${newBidAmount.toFixed(2)}) on "${auctionTitle}". Place a new bid to stay in the race!`,
+      `Someone placed a lower bid (₹${newBidAmount.toFixed(2)}) on "${auctionTitle}". Place a new bid to stay in the race!`,
       data,
       'driver' // Only drivers place bids
     );
@@ -175,7 +173,7 @@ class AuctionNotificationService {
     await this.sendNotificationToUser(
       creatorId,
       '💰 New Bid Received!',
-      `Someone placed a bid of $${bidAmount.toFixed(2)} on your auction "${auctionTitle}".`,
+      `Someone placed a bid of ₹${bidAmount.toFixed(2)} on your auction "${auctionTitle}".`,
       data,
       'consigner' // Only consigners create auctions
     );
@@ -191,7 +189,6 @@ class AuctionNotificationService {
         .eq('auction_id', auctionId);
 
       if (error || !bidders) {
-        console.error('Error fetching bidders:', error);
         return;
       }
 
@@ -214,8 +211,8 @@ class AuctionNotificationService {
           'driver' // Only drivers place bids
         );
       }
-    } catch (error) {
-      console.error('Error notifying auction cancelled:', error);
+    } catch {
+      // Silently handle errors in production
     }
   }
 
@@ -230,7 +227,6 @@ class AuctionNotificationService {
         .limit(100); // Limit to avoid spam
 
       if (error || !interestedUsers) {
-        console.error('Error fetching interested users:', error);
         return;
       }
 
@@ -251,8 +247,8 @@ class AuctionNotificationService {
           'driver' // Only drivers bid on auctions
         );
       }
-    } catch (error) {
-      console.error('Error notifying upcoming auction:', error);
+    } catch {
+      // Silently handle errors in production
     }
   }
 
@@ -267,21 +263,11 @@ class AuctionNotificationService {
         .or(`vehicle_type.eq.${vehicleType},vehicle_type.is.null`);
 
       if (error || !drivers) {
-        console.error('Error fetching drivers:', error);
         return;
       }
 
-      // Filter drivers by vehicle type and push token availability
-      const driversWithTokens = drivers.filter(d => d.push_token);
-
-      // Log statistics for monitoring (in development only)
-      if (__DEV__) {
-        console.log(`Found ${drivers.length} drivers to notify about new auction (vehicle: ${vehicleType})`);
-        console.log(`Drivers with matching vehicle type: ${drivers.filter(d => d.vehicle_type === vehicleType).length}`);
-        console.log(`Drivers with null vehicle type (backward compatibility): ${drivers.filter(d => d.vehicle_type === null).length}`);
-        console.log(`Drivers with push tokens: ${driversWithTokens.length}`);
-        console.log(`Drivers without push tokens: ${drivers.length - driversWithTokens.length}`);
-      }
+      // Filter drivers by vehicle type and push token availability 
+      const validDrivers = drivers.filter(d => d.push_token);
 
       const data: AuctionNotificationData = {
         auctionId,
@@ -295,8 +281,7 @@ class AuctionNotificationService {
       ).join(' ');
 
       // Send notification to drivers (drivers only)
-      let successCount = 0;
-      for (const driver of drivers) {
+      for (const driver of validDrivers) {
         try {
           await this.sendNotificationToUser(
             driver.id,
@@ -305,17 +290,12 @@ class AuctionNotificationService {
             data,
             'driver' // Only drivers should get new auction notifications
           );
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to notify driver ${driver.username} (${driver.id}):`, error);
+        } catch {
+          // Log error but continue with other drivers
         }
       }
-
-      if (__DEV__) {
-        console.log(`✅ Sent auction notifications to ${successCount}/${drivers.length} drivers`);
-      }
-    } catch (error) {
-      console.error('Error notifying drivers about new auction:', error);
+    } catch {
+      // Silently handle errors in production
     }
   }
 }

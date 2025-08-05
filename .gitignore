@@ -14,7 +14,7 @@ ios/Pods/
 .env.*.local
 *.jks
 *.keystore
-./google-services.json
+google-services.json
 GoogleService-Info.plist
 
 # misc
