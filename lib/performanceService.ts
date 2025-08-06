@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { appCache, CACHE_KEYS, CACHE_TTL } from './cache';
+import { appCache, CACHE_KEYS, CACHE_TTL } from './storage/cache';
 
 interface OptimizedAuction {
   id: string;
@@ -46,7 +46,7 @@ class PerformanceService {
     canBid: boolean;
   }> {
     const cacheKey = `optimized_auction_${auctionId}`;
-    
+
     // Check cache first
     const cached = appCache.get<any>(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30000) { // 30 second cache
@@ -55,7 +55,7 @@ class PerformanceService {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       // Single optimized query with minimal JOINs
       const [auctionResult, bidsResult, userRole] = await Promise.all([
         // Fetch auction with basic info only
@@ -64,7 +64,7 @@ class PerformanceService {
           .select('*')
           .eq('id', auctionId)
           .single(),
-        
+
         // Fetch bids with aggregated data
         supabase
           .from('auction_bids')
@@ -80,7 +80,7 @@ class PerformanceService {
           .eq('auction_id', auctionId)
           .order('amount', { ascending: true })
           .limit(50), // Limit bids for performance
-        
+
         // Get user role if authenticated
         user ? supabase
           .from('profiles')
@@ -95,7 +95,7 @@ class PerformanceService {
 
       const auction = auctionResult.data;
       const bids = bidsResult.data || [];
-      
+
       // Process bids efficiently
       const optimizedBids: OptimizedBid[] = bids.map(bid => ({
         id: bid.id,
@@ -108,17 +108,36 @@ class PerformanceService {
       }));
 
       const userBid = user ? optimizedBids.find(bid => bid.user_id === user.id) || null : null;
-      
+
       // Determine if user can bid (simple logic, no complex queries)
-      const canBid = user && 
-        userRole?.data?.role === 'driver' && 
-        auction.status === 'active' && 
+      const canBid = user &&
+        userRole?.data?.role === 'driver' &&
+        auction.status === 'active' &&
         new Date(auction.end_time) > new Date() &&
         auction.created_by !== user.id &&
         !userBid;
 
-      const result = {
-        auction,
+      const result: {
+        auction: OptimizedAuction | null;
+        bids: OptimizedBid[];
+        userBid: OptimizedBid | null;
+        canBid: boolean;
+      } = {
+        auction: auction ? {
+          id: auction.id,
+          title: auction.title,
+          description: auction.description,
+          status: auction.status,
+          end_time: auction.end_time,
+          vehicle_type: auction.vehicle_type,
+          created_by: auction.created_by,
+          winner_id: auction.winner_id,
+          start_time: auction.start_time,
+          consignment_date: auction.consignment_date,
+          bid_count: auction.bid_count,
+          highest_bid: auction.highest_bid,
+          lowest_bid: auction.lowest_bid
+        } as OptimizedAuction : null,
         bids: optimizedBids,
         userBid,
         canBid: !!canBid
@@ -159,7 +178,7 @@ class PerformanceService {
       // Schedule notification processing in background
       this.scheduleBackgroundTask(async () => {
         try {
-          const { auctionNotificationService } = await import('./auctionNotifications');
+          const { auctionNotificationService } = await import('./notifications/auctionNotifications');
           await auctionNotificationService.notifyNewAuction(
             auction.id,
             auctionData.title,
@@ -216,14 +235,14 @@ class PerformanceService {
     const taskPromise = task().finally(() => {
       this.backgroundTasks.delete(taskPromise);
     });
-    
+
     this.backgroundTasks.add(taskPromise);
   }
 
   // Simplified auction list for better performance
   async getAvailableAuctionsOptimized(userRole: string, vehicleType?: string): Promise<OptimizedAuction[]> {
     const cacheKey = `available_auctions_optimized_${userRole}_${vehicleType || 'all'}`;
-    
+
     const cached = appCache.get<OptimizedAuction[]>(cacheKey);
     if (cached) {
       return cached;
@@ -262,7 +281,7 @@ class PerformanceService {
 
       const optimizedAuctions = auctions || [];
       appCache.set(cacheKey, optimizedAuctions, CACHE_TTL.AUCTIONS);
-      
+
       return optimizedAuctions;
     } catch (error) {
       console.error('Error in getAvailableAuctionsOptimized:', error);
@@ -273,7 +292,7 @@ class PerformanceService {
   // Batch status check for multiple auctions (reduces individual calls)
   async batchCheckAuctionStatus(auctionIds: string[]): Promise<Map<string, string>> {
     const statusMap = new Map<string, string>();
-    
+
     if (auctionIds.length === 0) return statusMap;
 
     try {

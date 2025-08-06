@@ -7,7 +7,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 const VEHICLE_TYPE_MAPPING = {
   Truck: 'large_truck',

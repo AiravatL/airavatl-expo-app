@@ -12,8 +12,12 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/performanceService';
-import { dataService, type Auction, type Bid } from '@/lib/dataService';
+import { performanceService } from '@/lib/services/performanceService';
+import {
+  dataService,
+  type Auction,
+  type Bid,
+} from '@/lib/services/dataService';
 import { format, isPast } from 'date-fns';
 
 type UserRole = 'consigner' | 'driver';
@@ -111,7 +115,12 @@ export default function AuctionsScreen() {
           status: 'active', // Default status
           created_at: bid.created_at,
           is_winning_bid: bid.is_winning_bid,
-          auction: bid.auction,
+          auction:
+            bid.auction &&
+            typeof bid.auction === 'object' &&
+            !('message' in bid.auction)
+              ? bid.auction
+              : null,
           user_id: bid.user_id,
           auction_id: bid.auction_id,
         }));
