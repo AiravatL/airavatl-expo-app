@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     ...Platform.select({
       web: {
-        outline: 'none',
+        outlineStyle: 'none',
       } as any,
     }),
   },
@@ -537,7 +537,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     ...Platform.select({
       web: {
-        outline: 'none',
+        outlineStyle: 'none',
       } as any,
     }),
   },
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     ...Platform.select({
       web: {
-        outline: 'none',
+        outlineStyle: 'none',
       } as any,
     }),
   },
