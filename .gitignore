@@ -7,7 +7,7 @@ ios/Pods/
 /android
 /ios
 .eas
-
+.bolt
 # secrets & credentials
 .env
 .env.local
