@@ -45,6 +45,13 @@ export default function SignInScreen() {
     try {
       console.log('📧 Attempting sign in with email:', email);
 
+      // Check if Supabase is properly configured
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl || supabaseUrl.includes('your-project-ref') || supabaseUrl === 'your_supabase_url_here') {
+        setError('Supabase is not properly configured. Please check your environment variables.');
+        return;
+      }
+
       const {
         data: { user, session },
         error: signInError,
@@ -63,6 +70,8 @@ export default function SignInScreen() {
         console.error('❌ Sign in error:', signInError);
         if (signInError.message === 'Invalid login credentials') {
           setError('Invalid email or password. Please check your credentials.');
+        } else if (signInError.message.includes('Failed to fetch') || signInError.message.includes('fetch')) {
+          setError('Unable to connect to the server. Please check your internet connection and try again.');
         } else if (signInError.message.includes('Email not confirmed')) {
           setError(
             'Please check your email and confirm your account before signing in.'
