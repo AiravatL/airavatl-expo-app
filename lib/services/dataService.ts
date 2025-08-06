@@ -1,5 +1,5 @@
-import { supabase } from './supabase';
-import { appCache, CACHE_KEYS, CACHE_TTL } from './cache';
+import { supabase } from '../supabase';
+import { appCache, CACHE_KEYS, CACHE_TTL } from '../storage/cache';
 
 export interface Profile {
   id: string;
@@ -46,7 +46,7 @@ class DataService {
   // Get user profile with caching
   async getUserProfile(userId: string, forceRefresh = false): Promise<Profile | null> {
     const cacheKey = CACHE_KEYS.USER_PROFILE(userId);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<Profile>(cacheKey);
       if (cached) {
@@ -70,7 +70,7 @@ class DataService {
         appCache.set(cacheKey, data, CACHE_TTL.PROFILE);
       }
 
-      return data;
+      return data as Profile;
     } catch (error) {
       console.error('Error in getUserProfile:', error);
       return null;
@@ -80,7 +80,7 @@ class DataService {
   // Get user auctions with caching (for consigners)
   async getUserAuctions(userId: string, forceRefresh = false): Promise<Auction[]> {
     const cacheKey = CACHE_KEYS.USER_AUCTIONS(userId);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<Auction[]>(cacheKey);
       if (cached) {
@@ -112,7 +112,7 @@ class DataService {
   // Get user bids with caching (for drivers)
   async getUserBids(userId: string, forceRefresh = false): Promise<Bid[]> {
     const cacheKey = CACHE_KEYS.USER_BIDS(userId);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<Bid[]>(cacheKey);
       if (cached) {
@@ -166,7 +166,7 @@ class DataService {
   // Get available auctions with caching and filtering
   async getAvailableAuctions(userVehicleType?: string, forceRefresh = false): Promise<Auction[]> {
     const cacheKey = CACHE_KEYS.AVAILABLE_AUCTIONS(userVehicleType);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<Auction[]>(cacheKey);
       if (cached) {
@@ -205,7 +205,7 @@ class DataService {
   // Get auction details with caching
   async getAuctionDetails(auctionId: string, forceRefresh = false): Promise<Auction | null> {
     const cacheKey = CACHE_KEYS.AUCTION_DETAILS(auctionId);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<Auction>(cacheKey);
       if (cached) {
@@ -239,7 +239,7 @@ class DataService {
   // Get auction bids with caching
   async getAuctionBids(auctionId: string, forceRefresh = false): Promise<any[]> {
     const cacheKey = CACHE_KEYS.AUCTION_BIDS(auctionId);
-    
+
     if (!forceRefresh) {
       const cached = appCache.get<any[]>(cacheKey);
       if (cached) {

@@ -1,5 +1,5 @@
 // lib/auctionNotifications.ts
-import { supabase } from './supabase';
+import { supabase } from '../supabase';
 import { pushNotificationService } from './pushNotifications';
 
 export interface AuctionNotificationData {
@@ -34,9 +34,9 @@ class AuctionNotificationService {
 
   // Send notification to a specific user with role validation
   async sendNotificationToUser(
-    userId: string, 
-    title: string, 
-    body: string, 
+    userId: string,
+    title: string,
+    body: string,
     data: AuctionNotificationData,
     targetRole?: 'consigner' | 'driver' // Optional role filtering
   ) {
@@ -266,7 +266,7 @@ class AuctionNotificationService {
         return;
       }
 
-      // Filter drivers by vehicle type and push token availability 
+      // Filter drivers by vehicle type and push token availability
       const validDrivers = drivers.filter(d => d.push_token);
 
       const data: AuctionNotificationData = {
@@ -276,7 +276,7 @@ class AuctionNotificationService {
       };
 
       // Vehicle type display name
-      const vehicleDisplayName = vehicleType.split('_').map(word => 
+      const vehicleDisplayName = vehicleType.split('_').map(word =>
         word.charAt(0).toUpperCase() + word.slice(1)
       ).join(' ');
 

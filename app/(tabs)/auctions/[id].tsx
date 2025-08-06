@@ -16,7 +16,7 @@ import {
 import { useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/performanceService';
+import { performanceService } from '@/lib/services/performanceService';
 import { formatDistanceToNow, isPast } from 'date-fns';
 
 interface Auction {
@@ -306,7 +306,7 @@ const AuctionDetailsScreen = () => {
       setTimeout(async () => {
         try {
           const { auctionNotificationService } = await import(
-            '@/lib/auctionNotifications'
+            '@/lib/notifications/auctionNotifications'
           );
 
           // Get previous bidders who are now outbid (since lower bids win in this auction format)

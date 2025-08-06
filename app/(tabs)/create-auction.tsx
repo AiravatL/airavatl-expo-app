@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/performanceService';
+import { performanceService } from '@/lib/services/performanceService';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
@@ -159,7 +159,7 @@ export default function CreateAuctionScreen() {
       setTimeout(async () => {
         try {
           const { auctionNotificationService } = await import(
-            '@/lib/auctionNotifications'
+            '@/lib/notifications/auctionNotifications'
           );
           await auctionNotificationService.notifyNewAuction(
             result.data.id,

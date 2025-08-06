@@ -11,7 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/performanceService';
+import { performanceService } from '@/lib/services/performanceService';
 import { formatDistanceToNow } from 'date-fns';
 
 interface OptimizedAuction {
