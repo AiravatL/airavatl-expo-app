@@ -17,11 +17,6 @@ export const STORAGE_KEYS = {
   FIRST_TIME_USER: 'first_time_user',
   APP_VERSION: 'app_version',
 
-  // Cache
-  AUCTIONS_CACHE: 'auctions_cache',
-  USER_PROFILE_CACHE: 'user_profile_cache',
-  NOTIFICATIONS_CACHE: 'notifications_cache',
-
   // Push notifications
   PUSH_TOKEN: 'push_token',
   NOTIFICATION_PERMISSIONS: 'notification_permissions',

@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/services/performanceService';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
@@ -121,7 +120,7 @@ export default function CreateAuctionScreen() {
 
     setIsSubmitting(true);
     try {
-      // Get user from cache or quickly fetch
+      // Get current user
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -146,13 +145,15 @@ export default function CreateAuctionScreen() {
         consignment_date: consignmentDate.toISOString(),
       };
 
-      // Use performanceService for optimized creation
-      const result = await performanceService.createAuctionOptimized(
-        auctionData
-      );
+      // Create auction directly with Supabase
+      const { data: createdAuction, error: auctionError } = await supabase
+        .from('auctions')
+        .insert(auctionData)
+        .select()
+        .single();
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to create auction');
+      if (auctionError) {
+        throw new Error(auctionError.message || 'Failed to create auction');
       }
 
       // Send notifications in background (non-blocking)
@@ -162,7 +163,7 @@ export default function CreateAuctionScreen() {
             '@/lib/notifications/auctionNotifications'
           );
           await auctionNotificationService.notifyNewAuction(
-            result.data.id,
+            createdAuction.id,
             `Delivery from ${from} to ${to}`,
             vehicleType,
             parseFloat(weight)

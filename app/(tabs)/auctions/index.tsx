@@ -12,15 +12,34 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/services/performanceService';
-import {
-  dataService,
-  type Auction,
-  type Bid,
-} from '@/lib/services/dataService';
 import { format, isPast } from 'date-fns';
 
 type UserRole = 'consigner' | 'driver';
+
+interface Auction {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  end_time: string;
+  vehicle_type: string;
+  created_by: string;
+  winner_id: string | null;
+  start_time: string;
+  consignment_date: string;
+  created_at?: string;
+}
+
+interface Bid {
+  id: string;
+  amount: number;
+  status: string;
+  created_at: string | null;
+  is_winning_bid: boolean | null;
+  auction: Auction | null;
+  user_id: string;
+  auction_id: string;
+}
 
 const VEHICLE_TYPES = [
   { id: 'all', label: 'All Vehicles', icon: 'grid' },
@@ -59,38 +78,60 @@ export default function AuctionsScreen() {
       }
 
       // Get user profile to determine role and vehicle type
-      const profile = await dataService.getUserProfile(user.id);
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role, vehicle_type')
+        .eq('id', user.id)
+        .single();
 
-      if (!profile) {
+      if (profileError || !profile) {
         throw new Error('User profile not found');
       }
 
       setUserRole(profile.role as UserRole);
 
       if (profile.role === 'driver') {
-        // Use optimized performance service for faster loading
-        const vehicleTypeFilter =
-          selectedVehicleType === 'all' ? undefined : selectedVehicleType;
-        const effectiveVehicleType =
-          vehicleTypeFilter ||
-          (profile.vehicle_type ? profile.vehicle_type : undefined);
-        const optimizedAuctions =
-          await performanceService.getAvailableAuctionsOptimized(
-            'driver',
-            effectiveVehicleType
-          );
+        // Fetch available auctions for drivers directly
+        let query = supabase
+          .from('auctions')
+          .select('*')
+          .eq('status', 'active')
+          .gt('end_time', new Date().toISOString())
+          .order('created_at', { ascending: false });
 
-        // Convert optimized auctions to match Auction interface
-        const convertedAuctions: Auction[] = optimizedAuctions.map(
+        // Add vehicle type filter if specified
+        if (selectedVehicleType !== 'all') {
+          query = query.eq('vehicle_type', selectedVehicleType);
+        } else if (profile.vehicle_type) {
+          query = query.eq('vehicle_type', profile.vehicle_type);
+        }
+
+        const { data: auctionsData, error: auctionsError } = await query;
+
+        if (auctionsError) {
+          throw auctionsError;
+        }
+
+        // Convert to expected format
+        const convertedAuctions: Auction[] = (auctionsData || []).map(
           (auction) => ({
-            ...auction,
+            id: auction.id,
+            title: auction.title,
+            description: auction.description,
+            status: auction.status,
+            end_time: auction.end_time,
+            vehicle_type: auction.vehicle_type,
+            created_by: auction.created_by,
+            winner_id: auction.winner_id,
+            start_time: auction.start_time,
+            consignment_date: auction.consignment_date,
             created_at: auction.start_time, // Use start_time as created_at fallback
           })
         );
 
         setAuctions(convertedAuctions);
 
-        // Fetch driver's bids efficiently using cached data
+        // Fetch driver's bids
         const { data: userBids } = await supabase
           .from('auction_bids')
           .select(
@@ -127,9 +168,18 @@ export default function AuctionsScreen() {
 
         setBids(mappedBids);
       } else {
-        // Use optimized service for consigner auctions
-        const userAuctions = await dataService.getUserAuctions(user.id, true); // Force refresh
-        setAuctions(userAuctions);
+        // Fetch user's own auctions for consigners
+        const { data: userAuctions, error: auctionsError } = await supabase
+          .from('auctions')
+          .select('*')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false });
+
+        if (auctionsError) {
+          throw auctionsError;
+        }
+
+        setAuctions((userAuctions as Auction[]) || []);
       }
     } catch {
       setError('Failed to load data. Please try again.');

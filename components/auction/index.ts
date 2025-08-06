@@ -1,1 +1,1 @@
-export { default as OptimizedAuctionsList } from './OptimizedAuctionsList';
+// Auction components - using simple implementations without performance optimizations
