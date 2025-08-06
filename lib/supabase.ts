@@ -22,14 +22,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// Additional validation to ensure we don't have placeholder values
-if (supabaseUrl.includes('$') || supabaseUrl === 'your_supabase_url_here') {
+// Additional validation to ensure we have valid URLs
+try {
+  new URL(supabaseUrl);
+} catch (error) {
   console.error('Invalid Supabase URL detected:', supabaseUrl);
-  throw new Error('Supabase URL contains placeholder values. Please check your environment configuration.');
+  throw new Error('Supabase URL is not a valid URL format. Please check your environment configuration.');
 }
 
-if (supabaseAnonKey.includes('$') || supabaseAnonKey === 'your_supabase_anon_key_here') {
-  throw new Error('Supabase Anon Key contains placeholder values. Please check your environment configuration.');
+// Check for placeholder values
+if (supabaseUrl.includes('$') || supabaseUrl === 'your_supabase_url_here' || supabaseUrl.includes('placeholder')) {
+  console.error('Invalid Supabase URL detected:', supabaseUrl);
+  console.warn('⚠️ Using placeholder Supabase URL. Please update with your actual Supabase project URL.');
+}
+
+if (supabaseAnonKey.includes('$') || supabaseAnonKey === 'your_supabase_anon_key_here' || supabaseAnonKey.includes('placeholder')) {
+  console.warn('⚠️ Using placeholder Supabase Anon Key. Please update with your actual Supabase project key.');
 }
 
 // Create a single Supabase client
