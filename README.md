@@ -11,6 +11,8 @@ A React Native + Expo application for the AiravatL logistics platform.
 
 ## Getting Started
 
+- create a .env
+
 ```bash
 git clone https://github.com/AiravatL/airavatl-expo-app.git
 cd airavatl-expo-app
