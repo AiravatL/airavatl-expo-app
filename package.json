@@ -21,7 +21,7 @@
     "build:ios:production": "eas build --platform ios --profile production"
   },
   "dependencies": {
-    "@expo-google-fonts/inter": "^0.2.3",
+    "@expo-google-fonts/inter": "^0.4.1",
     "@expo/vector-icons": "^14.0.0",
     "@hookform/resolvers": "^5.2.1",
     "@react-native-async-storage/async-storage": "2.1.2",
