@@ -1,7 +1,6 @@
 module.exports = {
   preset: 'jest-expo',
   setupFilesAfterEnv: [
-    '@testing-library/jest-native/extend-expect',
     '<rootDir>/jest.setup.js'
   ],
   transformIgnorePatterns: [
@@ -34,7 +33,7 @@ module.exports = {
     'jsx',
     'json'
   ],
-  moduleNameMapping: {
+  moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
     '^@components/(.*)$': '<rootDir>/components/$1',
     '^@lib/(.*)$': '<rootDir>/lib/$1',
