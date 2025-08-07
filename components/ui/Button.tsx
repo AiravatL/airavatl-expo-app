@@ -160,6 +160,7 @@ const Button: React.FC<ButtonProps> = ({
 
   return (
     <TouchableOpacity
+      testID="test-button"
       style={combinedStyles}
       onPress={onPress}
       disabled={disabled || loading}
@@ -167,6 +168,7 @@ const Button: React.FC<ButtonProps> = ({
     >
       {loading ? (
         <ActivityIndicator
+          testID="button-loading"
           size="small"
           color={getIconColor()}
           style={{ marginRight: 8 }}

@@ -43,8 +43,13 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
         if (user) {
           try {
             await pushNotificationService.savePushTokenToDatabase(token, user.id);
-          } catch {
-            setError('Push token generated but failed to save to database. Some notifications may not work.');
+            if (__DEV__) {
+              console.log('✅ Push token saved successfully');
+            }
+          } catch (saveError) {
+            const errorMessage = saveError instanceof Error ? saveError.message : 'Unknown error';
+            console.error('❌ Failed to save push token:', errorMessage);
+            setError(`Push token generated but failed to save: ${errorMessage}`);
           }
         } else {
           setError('No user session found. Please sign in to enable push notifications.');

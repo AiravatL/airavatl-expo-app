@@ -25,6 +25,8 @@ export interface PushNotificationService {
 }
 
 class PushNotificationServiceImpl implements PushNotificationService {
+  private saveTokenDebounceMap = new Map<string, ReturnType<typeof setTimeout>>();
+
   async registerForPushNotificationsAsync(): Promise<string | undefined> {
     try {
       // Push notifications require a physical device
@@ -110,20 +112,77 @@ class PushNotificationServiceImpl implements PushNotificationService {
   }
 
   async savePushTokenToDatabase(token: string, userId: string): Promise<void> {
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ push_token: token })
-        .eq('id', userId);
-
-      if (error) {
-        console.error('Error saving push token:', error);
-        throw error;
-      }
-    } catch (error) {
-      console.error('Failed to save push token:', error);
-      throw error;
+    // Debounce multiple rapid calls for the same user
+    const debounceKey = `${userId}-${token}`;
+    
+    if (this.saveTokenDebounceMap.has(debounceKey)) {
+      clearTimeout(this.saveTokenDebounceMap.get(debounceKey)!);
     }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(async () => {
+        try {
+          // Validate inputs
+          if (!token || !userId) {
+            throw new Error('Invalid token or userId provided');
+          }
+
+          // Check if token is already saved to avoid unnecessary updates
+          const { data: currentProfile, error: fetchError } = await supabase
+            .from('profiles')
+            .select('push_token')
+            .eq('id', userId)
+            .single();
+
+          if (fetchError) {
+            console.error('Error fetching current push token:', fetchError);
+            throw new Error(`Failed to fetch current profile: ${fetchError.message}`);
+          }
+
+          // Skip update if token is already the same
+          if (currentProfile?.push_token === token) {
+            this.saveTokenDebounceMap.delete(debounceKey);
+            resolve();
+            return;
+          }
+
+          const { error } = await supabase
+            .from('profiles')
+            .update({ push_token: token })
+            .eq('id', userId);
+
+          if (error) {
+            console.error('Error saving push token:', {
+              error,
+              userId,
+              tokenLength: token.length,
+              errorCode: error.code,
+              errorMessage: error.message
+            });
+            throw new Error(`Database error: ${error.message} (Code: ${error.code})`);
+          }
+
+          // Success - optionally log in development
+          if (__DEV__) {
+            console.log('Push token saved successfully for user:', userId);
+          }
+          
+          this.saveTokenDebounceMap.delete(debounceKey);
+          resolve();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Failed to save push token:', {
+            error: errorMessage,
+            userId,
+            tokenLength: token?.length || 0
+          });
+          this.saveTokenDebounceMap.delete(debounceKey);
+          reject(new Error(`Push token save failed: ${errorMessage}`));
+        }
+      }, 5000); // 5000ms debounce
+
+      this.saveTokenDebounceMap.set(debounceKey, timeoutId);
+    });
   }
 
   async sendPushNotification(
