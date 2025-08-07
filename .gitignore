@@ -8,7 +8,7 @@ ios/Pods/
 /ios
 .eas
 .bolt
-supabase
+
 
 # secrets & credentials
 .env
