@@ -115,6 +115,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
     fontFamily: 'Inter_400Regular',
-    outlineStyle: 'none',
+    // outlineStyle is web-only and not supported in React Native
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' }),
   },
 });

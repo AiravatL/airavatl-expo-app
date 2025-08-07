@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { pushNotificationService, handleNotificationResponse } from '@/lib/pushNotifications';
+import { pushNotificationService, handleNotificationResponse } from '@/lib/notifications/pushNotifications';
 import { supabase } from '@/lib/supabase';
 
 export interface UsePushNotificationsReturn {
@@ -28,23 +28,28 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
 
     try {
       const token = await pushNotificationService.registerForPushNotificationsAsync();
-      
+
       if (token) {
         setExpoPushToken(token);
-        
+
         // Save token to database if user is authenticated
         const { data: { user }, error: userError } = await supabase.auth.getUser();
-        
+
         if (userError) {
           setError('Failed to get user session. Push notifications may not work properly.');
           return;
         }
-        
+
         if (user) {
           try {
             await pushNotificationService.savePushTokenToDatabase(token, user.id);
-          } catch {
-            setError('Push token generated but failed to save to database. Some notifications may not work.');
+            if (__DEV__) {
+              console.log('✅ Push token saved successfully');
+            }
+          } catch (saveError) {
+            const errorMessage = saveError instanceof Error ? saveError.message : 'Unknown error';
+            console.error('❌ Failed to save push token:', errorMessage);
+            setError(`Push token generated but failed to save: ${errorMessage}`);
           }
         } else {
           setError('No user session found. Please sign in to enable push notifications.');
@@ -60,7 +65,7 @@ export const usePushNotifications = (): UsePushNotificationsReturn => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to register for push notifications';
       setError(errorMessage);
-      
+
       // Don't show technical errors to users in production
       if (Constants.appOwnership !== 'expo') {
         setError('Failed to set up push notifications. Please try again or contact support if the problem persists.');

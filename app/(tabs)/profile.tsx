@@ -1172,11 +1172,7 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     borderWidth: 1,
     borderColor: '#E5E5E5',
-    ...Platform.select({
-      web: {
-        outlineStyle: 'none',
-      },
-    }),
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   textArea: {
     backgroundColor: '#F8F9FA',
@@ -1189,11 +1185,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E5E5',
     height: 120,
     textAlignVertical: 'top',
-    ...Platform.select({
-      web: {
-        outlineStyle: 'none',
-      },
-    }),
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   submitButton: {
     backgroundColor: '#007AFF',

@@ -16,7 +16,6 @@ import {
 import { useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { performanceService } from '@/lib/performanceService';
 import { formatDistanceToNow, isPast } from 'date-fns';
 
 interface Auction {
@@ -155,45 +154,101 @@ const AuctionDetailsScreen = () => {
         return;
       }
 
-      // Use optimized performance service for faster loading
-      const result = await performanceService.getOptimizedAuctionDetails(
-        String(params.id)
-      );
+      // Fetch auction details directly from Supabase
+      const { data: auctionData, error: auctionError } = await supabase
+        .from('auctions')
+        .select('*')
+        .eq('id', String(params.id))
+        .single();
 
-      if (!result.auction) {
+      if (auctionError || !auctionData) {
         setError('Auction not found');
         setAuction(null);
         setBids([]);
         return;
       }
 
-      // Convert OptimizedAuction to Auction interface
+      // Fetch bids for this auction
+      const { data: bidsData, error: bidsError } = await supabase
+        .from('auction_bids')
+        .select(
+          `
+          id,
+          amount,
+          created_at,
+          is_winning_bid,
+          user_id,
+          auction_id,
+          profiles!auction_bids_user_id_fkey (
+            id,
+            username
+          )
+        `
+        )
+        .eq('auction_id', String(params.id))
+        .order('amount', { ascending: true });
+
+      if (bidsError) {
+        console.error('Error fetching bids:', bidsError);
+        setBids([]);
+      } else {
+        // Convert to expected Bid format
+        const convertedBids: Bid[] = (bidsData || []).map((bid) => ({
+          id: bid.id,
+          auction_id: bid.auction_id,
+          user_id: bid.user_id,
+          amount: bid.amount,
+          created_at: bid.created_at,
+          is_winning_bid: bid.is_winning_bid,
+          bidder: { username: (bid.profiles as any)?.username || 'Anonymous' },
+        }));
+        setBids(convertedBids);
+      }
+
+      // Set auction data
       const convertedAuction: Auction = {
-        ...result.auction,
-        created_at: result.auction.start_time,
-        winning_bid_id: null, // Will be updated by database triggers
-        winner: result.auction.winner_id ? { username: 'Winner' } : null,
+        id: auctionData.id,
+        title: auctionData.title,
+        description: auctionData.description,
+        start_time: auctionData.start_time,
+        end_time: auctionData.end_time,
+        status: auctionData.status,
+        created_by: auctionData.created_by,
+        vehicle_type: auctionData.vehicle_type,
+        consignment_date: auctionData.consignment_date,
+        created_at: auctionData.start_time,
+        winner_id: auctionData.winner_id,
+        winning_bid_id: null,
+        winner: auctionData.winner_id ? { username: 'Winner' } : null,
       };
 
       setAuction(convertedAuction);
 
-      // Convert OptimizedBid to Bid interface
-      const convertedBids: Bid[] = result.bids.map((bid) => ({
-        ...bid,
-        bidder: { username: bid.bidder_username || 'Anonymous' },
-      }));
-
-      setBids(convertedBids);
-
-      // Set user's bid if exists
-      setUserBid(result.userBid);
+      // Find user's bid if exists
+      if (currentUser && bidsData) {
+        const userBidData = bidsData.find(
+          (bid) => bid.user_id === currentUser.id
+        );
+        if (userBidData) {
+          setUserBid({
+            id: userBidData.id,
+            auction_id: userBidData.auction_id,
+            user_id: userBidData.user_id,
+            amount: userBidData.amount,
+            created_at: userBidData.created_at,
+            is_winning_bid: userBidData.is_winning_bid,
+            bidder: {
+              username: (userBidData.profiles as any)?.username || 'Anonymous',
+            },
+          });
+        } else {
+          setUserBid(null);
+        }
+      }
 
       // Fetch contact info for completed auctions
       await fetchContactInfo(convertedAuction);
       setError(null);
-
-      // Simple status check - let database triggers handle auction closure
-      // Remove expensive manual auction closure checking
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to load auction details'
@@ -202,7 +257,7 @@ const AuctionDetailsScreen = () => {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [params.id, fetchContactInfo]);
+  }, [params.id, fetchContactInfo, currentUser]);
 
   useEffect(() => {
     fetchAuctionDetails();
@@ -291,22 +346,26 @@ const AuctionDetailsScreen = () => {
         return;
       }
 
-      // Use optimized bid creation for faster performance
-      const result = await performanceService.createBidOptimized(
-        auction.id,
-        amount,
-        currentUser.id
-      );
+      // Use direct Supabase call for bid creation
+      const { data: bidData, error: bidError } = await supabase
+        .from('auction_bids')
+        .insert({
+          auction_id: auction.id,
+          user_id: currentUser.id,
+          amount: amount,
+        })
+        .select()
+        .single();
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to place bid');
+      if (bidError) {
+        throw new Error(bidError.message || 'Failed to place bid');
       }
 
       // Send notifications in background (non-blocking)
       setTimeout(async () => {
         try {
           const { auctionNotificationService } = await import(
-            '@/lib/auctionNotifications'
+            '@/lib/notifications/auctionNotifications'
           );
 
           // Get previous bidders who are now outbid (since lower bids win in this auction format)

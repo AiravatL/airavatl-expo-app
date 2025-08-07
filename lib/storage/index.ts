@@ -1,0 +1,1 @@
+export { authStorage } from './storage';
