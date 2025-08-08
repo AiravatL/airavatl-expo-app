@@ -70,6 +70,13 @@ export function useAuth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!mounted) return;
 
+      if (__DEV__) {
+        console.log('🔄 Auth state change:', event, {
+          sessionExists: !!currentSession,
+          userId: currentSession?.user?.id || 'None'
+        });
+      }
+
       try {
         if (event === 'SIGNED_OUT') {
           await authStorage.clearAll();
@@ -81,14 +88,19 @@ export function useAuth() {
           setSession(currentSession);
           setIsLoading(false);
           setIsInitialized(true);
+          if (__DEV__) {
+            console.log('✅ Auth state updated for SIGNED_IN, user:', currentSession.user.id);
+          }
         } else if (event === 'TOKEN_REFRESHED' && currentSession) {
           await authStorage.saveSession(currentSession);
           setSession(currentSession);
           setIsLoading(false);
           setIsInitialized(true);
         }
-      } catch {
-        // Silently handle auth state change errors
+      } catch (error) {
+        if (__DEV__) {
+          console.error('❌ Auth state change error:', error);
+        }
       }
     });
 

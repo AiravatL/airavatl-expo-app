@@ -176,6 +176,15 @@ export default function TabLayout() {
           ),
           headerShown: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            // Reset the auctions stack when tab is pressed
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'auctions' }],
+            });
+          },
+        })}
       />
 
       <Tabs.Screen

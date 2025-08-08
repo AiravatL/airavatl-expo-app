@@ -30,18 +30,40 @@ export default function RootLayout() {
   const { session, isLoading, isInitialized } = useAuth();
   const { registerForPushNotifications } = usePushNotifications();
 
-  // Register for push notifications when user is authenticated
+  // Debug logging for session changes
   useEffect(() => {
-    if (session?.user?.id) {
-      // Don't block app loading if push notifications fail
-      registerForPushNotifications().catch((error) => {
-        if (__DEV__) {
-          console.warn('Push notification setup failed:', error);
-        }
-        // Continue app loading normally
+    if (__DEV__) {
+      console.log('🔍 Session state changed:', {
+        hasSession: !!session,
+        userId: session?.user?.id || 'None',
+        isLoading,
+        isInitialized,
       });
     }
-  }, [session?.user?.id, registerForPushNotifications]);
+  }, [session, isLoading, isInitialized]);
+
+  // Register for push notifications when user is authenticated
+  useEffect(() => {
+    if (session?.user?.id && isInitialized && !isLoading) {
+      // Wait a moment for the auth context to be fully established
+      const timer = setTimeout(() => {
+        // Don't block app loading if push notifications fail
+        registerForPushNotifications().catch((error) => {
+          if (__DEV__) {
+            console.warn('Push notification setup failed:', error);
+          }
+          // Continue app loading normally
+        });
+      }, 2000); // Wait 2 seconds after auth is ready
+
+      return () => clearTimeout(timer);
+    }
+  }, [
+    session?.user?.id,
+    isInitialized,
+    isLoading,
+    registerForPushNotifications,
+  ]);
 
   // Handle navigation after everything is ready and mounted
   useEffect(() => {
@@ -98,7 +120,7 @@ export default function RootLayout() {
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [fontsLoaded, session, isInitialized, isLoading]);
+  }, [fontsLoaded, session?.user?.id, isInitialized, isLoading]);
 
   // Show error screen if initialization failed
   if (initError) {

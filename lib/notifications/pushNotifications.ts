@@ -127,31 +127,43 @@ class PushNotificationServiceImpl implements PushNotificationService {
             throw new Error('Invalid token or userId provided');
           }
 
-          // Check if token is already saved to avoid unnecessary updates
-          const { data: currentProfile, error: fetchError } = await supabase
-            .from('profiles')
-            .select('push_token')
-            .eq('id', userId)
-            .single();
+          // Try to check if token is already saved to avoid unnecessary updates
+          // If this fails (e.g., during initial app setup), we'll proceed with the update
+          try {
+            const { data: currentProfile, error: fetchError } = await supabase
+              .from('profiles')
+              .select('push_token')
+              .eq('id', userId)
+              .single();
 
-          if (fetchError) {
-            console.error('Error fetching current push token:', fetchError);
-            throw new Error(`Failed to fetch current profile: ${fetchError.message}`);
+            // If fetch succeeded and token is the same, skip update
+            if (!fetchError && currentProfile?.push_token === token) {
+              this.saveTokenDebounceMap.delete(debounceKey);
+              resolve();
+              return;
+            }
+
+            // If fetch failed, log but continue with update
+            if (fetchError) {
+              console.log('Could not fetch current push token (proceeding with update):', fetchError.message);
+            }
+          } catch {
+            // If profile fetch fails, proceed with update anyway
+            console.log('Profile fetch failed during token check, proceeding with update');
           }
 
-          // Skip update if token is already the same
-          if (currentProfile?.push_token === token) {
-            this.saveTokenDebounceMap.delete(debounceKey);
-            resolve();
-            return;
-          }
-
+          // Proceed with token update
           const { error } = await supabase
             .from('profiles')
             .update({ push_token: token })
             .eq('id', userId);
 
           if (error) {
+            // Check if this is a profile not found error
+            if (error.code === 'PGRST116') {
+              throw new Error('User profile not found. Please wait for profile setup to complete.');
+            }
+            
             console.error('Error saving push token:', {
               error,
               userId,

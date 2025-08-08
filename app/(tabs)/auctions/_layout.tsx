@@ -60,6 +60,14 @@ export default function AuctionsLayout() {
         options={{
           title: 'Auction Details',
           headerShown: true,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.replace('/auctions')}
+              style={{ marginLeft: 16 }}
+            >
+              <Feather name="arrow-left" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          ),
         }}
       />
       <Stack.Screen

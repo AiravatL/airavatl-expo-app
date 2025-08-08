@@ -115,6 +115,8 @@ BEGIN
         WHEN 'auction_won' THEN 'Auction Won! 🎉'
         WHEN 'outbid' THEN 'You''ve been outbid 📢'
         WHEN 'bid_placed' THEN 'New bid placed 💰'
+        WHEN 'auction_created' THEN 'New auction available! 🚚'
+        WHEN 'auction_updated' THEN 'Auction updated! 🔄'
         WHEN 'auction_cancelled' THEN 'Auction cancelled ❌'
         WHEN 'auction_completed' THEN 'Auction completed ✅'
         ELSE 'Airavatl Notification'

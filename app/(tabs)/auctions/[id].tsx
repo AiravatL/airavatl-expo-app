@@ -13,7 +13,7 @@ import {
   Linking,
   Modal,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { formatDistanceToNow, isPast } from 'date-fns';
@@ -71,7 +71,10 @@ const AuctionDetailsScreen = () => {
   const [isCancelling, setIsCancelling] = useState(false);
   const [showCancelBidModal, setShowCancelBidModal] = useState(false);
   const [isCancellingBid, setIsCancellingBid] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [userBid, setUserBid] = useState<Bid | null>(null);
+  const [auctionHasBids, setAuctionHasBids] = useState(false);
+  const [checkingBids, setCheckingBids] = useState(false);
   const params = useLocalSearchParams();
 
   useEffect(() => {
@@ -259,6 +262,41 @@ const AuctionDetailsScreen = () => {
     }
   }, [params.id, fetchContactInfo, currentUser]);
 
+  // Check if auction has bids
+  const checkAuctionHasBids = useCallback(async () => {
+    if (!auction?.id) return false;
+
+    try {
+      setCheckingBids(true);
+      const { data: bids, error } = await supabase
+        .from('auction_bids')
+        .select('id')
+        .eq('auction_id', auction.id)
+        .limit(1);
+
+      if (error) {
+        console.error('Error checking bids:', error);
+        return false;
+      }
+
+      const hasBids = bids && bids.length > 0;
+      setAuctionHasBids(hasBids);
+      return hasBids;
+    } catch (error) {
+      console.error('Error checking auction bids:', error);
+      return false;
+    } finally {
+      setCheckingBids(false);
+    }
+  }, [auction?.id]);
+
+  // Check for bids when auction data is loaded
+  useEffect(() => {
+    if (auction?.id && currentUser && auction.created_by === currentUser.id) {
+      checkAuctionHasBids();
+    }
+  }, [auction?.id, auction?.created_by, currentUser, checkAuctionHasBids]);
+
   useEffect(() => {
     fetchAuctionDetails();
 
@@ -279,18 +317,14 @@ const AuctionDetailsScreen = () => {
 
       setIsCancelling(true);
 
-      // Call the cancellation function based on user role with correct parameter name
-      const method =
-        auction.created_by === currentUser.id
-          ? 'handle_consigner_cancellation'
-          : 'handle_winner_cancellation';
-      const paramName =
-        auction.created_by === currentUser.id
-          ? 'auction_id_param'
-          : 'auction_id';
-      const { error } = await (supabase as any).rpc(method, {
-        [paramName]: String(params.id),
-      });
+      // Call the auction cancellation function
+      const { error } = await (supabase as any).rpc(
+        'cancel_auction_by_consigner',
+        {
+          p_auction_id: String(params.id),
+          p_user_id: currentUser.id,
+        }
+      );
 
       if (error) throw error;
 
@@ -349,7 +383,7 @@ const AuctionDetailsScreen = () => {
       }
 
       // Use direct Supabase call for bid creation
-      const { data: bidData, error: bidError } = await supabase
+      const { error: bidError } = await supabase
         .from('auction_bids')
         .insert({
           auction_id: auction.id,
@@ -419,29 +453,6 @@ const AuctionDetailsScreen = () => {
     }
   };
 
-  const renderCancelButton = () => {
-    // Only show cancel button for consigners on their own active auctions
-    if (
-      !auction ||
-      userRole !== 'consigner' ||
-      auction.created_by !== currentUser?.id ||
-      auction.status !== 'active' ||
-      isPast(new Date(auction.end_time))
-    ) {
-      return null;
-    }
-
-    return (
-      <TouchableOpacity
-        style={styles.cancelButton}
-        onPress={() => setShowCancelModal(true)}
-      >
-        <Feather name="x-circle" size={20} color="#FFFFFF" />
-        <Text style={styles.cancelButtonText}>Cancel Auction</Text>
-      </TouchableOpacity>
-    );
-  };
-
   const renderCancelBidButton = () => {
     // Only show cancel bid button for drivers who have placed a bid on an active auction
     if (
@@ -465,121 +476,6 @@ const AuctionDetailsScreen = () => {
       </TouchableOpacity>
     );
   };
-
-  const renderCancelModal = () => (
-    <Modal
-      visible={showCancelModal}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setShowCancelModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Feather name="alert-triangle" size={24} color="#DC3545" />
-            <Text style={styles.modalTitle}>Cancel Auction</Text>
-          </View>
-
-          <Text style={styles.modalMessage}>
-            Are you sure you want to cancel this auction? This action cannot be
-            undone.
-          </Text>
-
-          {bids.length > 0 && (
-            <Text style={styles.modalWarning}>
-              This auction has {bids.length} bid{bids.length > 1 ? 's' : ''}.
-              All bidders will be notified of the cancellation.
-            </Text>
-          )}
-
-          <View style={styles.modalButtons}>
-            <TouchableOpacity
-              style={styles.modalCancelButton}
-              onPress={() => setShowCancelModal(false)}
-              disabled={isCancelling}
-            >
-              <Text style={styles.modalCancelButtonText}>Keep Auction</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modalConfirmButton,
-                isCancelling && styles.modalConfirmButtonDisabled,
-              ]}
-              onPress={handleCancelAuction}
-              disabled={isCancelling}
-            >
-              {isCancelling ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <Feather name="x-circle" size={16} color="#FFFFFF" />
-                  <Text style={styles.modalConfirmButtonText}>
-                    Cancel Auction
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderCancelBidModal = () => (
-    <Modal
-      visible={showCancelBidModal}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setShowCancelBidModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Feather name="alert-triangle" size={24} color="#DC3545" />
-            <Text style={styles.modalTitle}>Cancel Bid</Text>
-          </View>
-
-          <Text style={styles.modalMessage}>
-            Are you sure you want to cancel your bid of ₹{userBid?.amount}? This
-            action cannot be undone.
-          </Text>
-
-          <Text style={styles.modalWarning}>
-            The consigner will be notified of your bid cancellation.
-          </Text>
-
-          <View style={styles.modalButtons}>
-            <TouchableOpacity
-              style={styles.modalCancelButton}
-              onPress={() => setShowCancelBidModal(false)}
-              disabled={isCancellingBid}
-            >
-              <Text style={styles.modalCancelButtonText}>Keep Bid</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modalConfirmButton,
-                isCancellingBid && styles.modalConfirmButtonDisabled,
-              ]}
-              onPress={handleCancelBid}
-              disabled={isCancellingBid}
-            >
-              {isCancellingBid ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <Feather name="x-circle" size={16} color="#FFFFFF" />
-                  <Text style={styles.modalConfirmButtonText}>Cancel Bid</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
 
   const renderContactInfo = () => {
     if (
@@ -822,7 +718,84 @@ const AuctionDetailsScreen = () => {
         {renderTimeInfo()}
       </View>
 
-      {renderCancelButton()}
+      {/* Debug info for action buttons */}
+      {auction && currentUser && (
+        <Text style={{ padding: 10, fontSize: 12, color: 'gray' }}>
+          Debug: Owner: {auction.created_by === currentUser.id ? 'Yes' : 'No'},
+          Status: {auction.status}, Future start:{' '}
+          {new Date(auction.start_time) > new Date() ? 'Yes' : 'No'}
+        </Text>
+      )}
+
+      {/* Action buttons for auction owner */}
+      {auction &&
+        currentUser &&
+        auction.created_by === currentUser.id &&
+        auction.status === 'active' && (
+          <View style={styles.actionButtonsContainer}>
+            {!isPast(new Date(auction.end_time)) && (
+              <TouchableOpacity
+                style={[
+                  styles.editButton,
+                  (checkingBids || auctionHasBids) && styles.editButtonDisabled,
+                ]}
+                onPress={async () => {
+                  // Check for bids before allowing edit (real-time check)
+                  const hasBids = await checkAuctionHasBids();
+                  if (hasBids) {
+                    Alert.alert(
+                      'Cannot Edit Auction',
+                      'This auction cannot be edited because it already has bids from drivers. You can cancel the auction instead.',
+                      [
+                        { text: 'OK', style: 'default' },
+                        {
+                          text: 'Cancel Auction',
+                          style: 'destructive',
+                          onPress: () => setShowCancelModal(true),
+                        },
+                      ]
+                    );
+                  } else {
+                    setShowEditModal(true);
+                  }
+                }}
+                disabled={checkingBids}
+              >
+                {checkingBids ? (
+                  <ActivityIndicator size="small" color="#007AFF" />
+                ) : auctionHasBids ? (
+                  <Feather name="lock" size={20} color="#6C757D" />
+                ) : (
+                  <Feather name="edit-2" size={20} color="#007AFF" />
+                )}
+                <Text
+                  style={[
+                    styles.editButtonText,
+                    auctionHasBids && { color: '#6C757D' },
+                  ]}
+                >
+                  {checkingBids
+                    ? 'Checking...'
+                    : auctionHasBids
+                    ? 'Cannot Edit (Has Bids)'
+                    : 'Edit Auction'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {!isPast(new Date(auction.end_time)) && (
+              <TouchableOpacity
+                style={styles.actionCancelButton}
+                onPress={() => setShowCancelModal(true)}
+              >
+                <Feather name="x-circle" size={20} color="#FFFFFF" />
+                <Text style={styles.actionCancelButtonText}>
+                  Cancel Auction
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
       {renderCancelBidButton()}
       {renderWinnerSection()}
       {renderContactInfo()}
@@ -880,8 +853,124 @@ const AuctionDetailsScreen = () => {
         </View>
       )}
 
-      {renderCancelModal()}
-      {renderCancelBidModal()}
+      {/* Cancel Auction Modal */}
+      <Modal
+        visible={showCancelModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCancelModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.title}>Cancel Auction</Text>
+            <Text style={styles.description}>
+              Are you sure you want to cancel this auction? This action cannot
+              be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowCancelModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Keep Auction</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={handleCancelAuction}
+                disabled={isCancelling}
+              >
+                {isCancelling ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>
+                    Cancel Auction
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Cancel Bid Modal */}
+      <Modal
+        visible={showCancelBidModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCancelBidModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.title}>Cancel Bid</Text>
+            <Text style={styles.description}>
+              Are you sure you want to cancel your bid of ₹{userBid?.amount}?
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowCancelBidModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Keep Bid</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={handleCancelBid}
+                disabled={isCancellingBid}
+              >
+                {isCancellingBid ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>Cancel Bid</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Auction Modal */}
+      <Modal
+        visible={showEditModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.title}>Edit Auction</Text>
+            <Text style={styles.description}>
+              Navigate to the edit auction screen to make changes to your
+              auction details.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowEditModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  // Navigate to dedicated edit auction screen
+                  router.push({
+                    pathname: '/edit-auction',
+                    params: {
+                      auctionId: auction.id,
+                      title: auction.title,
+                      description: auction.description,
+                      vehicleType: auction.vehicle_type,
+                    },
+                  });
+                }}
+              >
+                <Text style={styles.modalConfirmButtonText}>Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -1370,6 +1459,47 @@ const styles = StyleSheet.create({
   },
   expiredText: {
     color: '#DC2626',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  // Action buttons styles
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    gap: 12,
+  },
+  editButton: {
+    flex: 1,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  editButtonDisabled: {
+    opacity: 0.6,
+  },
+  editButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  actionCancelButton: {
+    flex: 1,
+    backgroundColor: '#DC3545',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  actionCancelButtonText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
   },
