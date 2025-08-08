@@ -210,10 +210,11 @@ export default function AuctionsScreen() {
   useEffect(() => {
     fetchData();
 
-    // Simplified interval - just refresh data, let database handle closures
+    // Reduced polling frequency to prevent performance issues
+    // TODO: Replace with WebSocket/Realtime subscriptions
     const interval = setInterval(async () => {
       await fetchData(); // Simple data refresh, no expensive operations
-    }, 120000); // Increased to 2 minutes for better performance
+    }, 300000); // Increased to 5 minutes to reduce performance impact
 
     return () => clearInterval(interval);
   }, [fetchData]);

@@ -262,12 +262,13 @@ const AuctionDetailsScreen = () => {
   useEffect(() => {
     fetchAuctionDetails();
 
-    // Simple refresh interval - let database handle auction closure automatically
+    // Reduced polling frequency to prevent performance issues
+    // TODO: Replace with WebSocket/Realtime subscriptions
     const interval = setInterval(() => {
       if (auction?.status === 'active') {
         fetchAuctionDetails(); // Just refetch data, no expensive operations
       }
-    }, 60000); // Increased to 60 seconds for better performance
+    }, 300000); // Increased to 5 minutes to reduce performance impact
 
     return () => clearInterval(interval);
   }, [fetchAuctionDetails, auction?.status]);
@@ -311,8 +312,9 @@ const AuctionDetailsScreen = () => {
 
       setIsCancellingBid(true);
 
-      const { error } = await (supabase as any).rpc('cancel_bid', {
-        bid_id_param: userBid.id,
+      const { error } = await (supabase as any).rpc('cancel_bid_by_driver', {
+        p_bid_id: userBid.id,
+        p_user_id: currentUser.id,
       });
 
       if (error) throw error;
