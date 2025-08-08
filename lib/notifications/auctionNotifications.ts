@@ -5,7 +5,7 @@ import { pushNotificationService } from './pushNotifications';
 export interface AuctionNotificationData {
   auctionId: string;
   auctionTitle: string;
-  type: 'auction_created' | 'bid_placed' | 'outbid' | 'auction_won' | 'auction_lost' | 'auction_cancelled' | 'bid_cancelled';
+  type: 'auction_created' | 'auction_updated' | 'bid_placed' | 'outbid' | 'auction_won' | 'auction_lost' | 'auction_cancelled' | 'bid_cancelled';
   userId?: string;
   amount?: number;
 }
@@ -14,18 +14,22 @@ class AuctionNotificationService {
   // Helper method to get user role
   private async getUserRole(userId: string): Promise<'consigner' | 'driver' | null> {
     try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
+      // Use database function to bypass RLS
+      const { data: roleResult, error } = await supabase
+        .rpc('get_user_role', { user_id_param: userId }) as {
+          data: string | null;
+          error: any;
+        };
 
-      if (error || !profile) {
+      if (error || !roleResult) {
+        console.log(`⚠️ Could not get role for user ${userId}:`, error);
         return null;
       }
 
-      return profile.role as 'consigner' | 'driver';
-    } catch {
+      console.log(`👤 Retrieved role for user ${userId}: ${roleResult}`);
+      return roleResult as 'consigner' | 'driver';
+    } catch (error) {
+      console.error(`❌ Error in getUserRole:`, error);
       return null;
     }
   }
@@ -41,16 +45,20 @@ class AuctionNotificationService {
     targetRole?: 'consigner' | 'driver' // Optional role filtering
   ) {
     try {
+      console.log(`📤 sendNotificationToUser called for user ${userId}, title: ${title}, type: ${data.type}`);
+      
       // If role filtering is specified, check user's role first
       if (targetRole) {
         const userRole = await this.getUserRole(userId);
+        console.log(`👤 User role: ${userRole}, target role: ${targetRole}`);
         if (userRole !== targetRole) {
-          // Skip notification for user due to role mismatch
+          console.log(`⚠️ Skipping notification - role mismatch`);
           return;
         }
       }
 
       // Always save to auction_notifications table first
+      console.log(`💾 Saving notification to database...`);
       const { error: dbError } = await supabase.from('auction_notifications').insert({
         user_id: userId,
         auction_id: data.auctionId,
@@ -59,23 +67,66 @@ class AuctionNotificationService {
       });
 
       if (dbError) {
+        console.error(`❌ Database error:`, dbError);
         return;
       }
 
-      // Database notification saved successfully
+      console.log(`✅ Database notification saved successfully`);
 
-      // Get user's push token from database
+      // Get user's push token from database using a query that respects RLS
+      console.log(`🔍 Getting user's push token...`);
+      
+      // For drivers, use our drivers function directly to avoid RLS issues
+      if (targetRole === 'driver') {
+        console.log(`🚗 Getting driver token via notification function...`);
+        const { data: driversData, error: driversError } = await supabase
+          .rpc('get_drivers_for_notification', { vehicle_type_param: 'all' }) as {
+            data: {
+              id: string;
+              username: string;
+              push_token: string;
+              vehicle_type: string;
+            }[] | null;
+            error: any;
+          };
+        
+        if (!driversError && driversData) {
+          const driver = driversData.find(d => d.id === userId);
+          if (driver?.push_token) {
+            console.log(`📱 Found driver push token`);
+            await pushNotificationService.sendPushNotification(
+              driver.push_token,
+              title,
+              body,
+              data
+            );
+            console.log(`✅ Push notification sent successfully to driver ${userId}`);
+            return;
+          }
+        }
+        
+        console.log(`⚠️ Could not find driver ${userId} in notification function results`);
+        return;
+      }
+      
+      // For consigners, try direct query (should work due to RLS allowing own profile access)
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('push_token')
+        .select('push_token, role')
         .eq('id', userId)
         .single();
 
-      if (error || !profile?.push_token) {
-        // No push token found, but database notification was saved
+      if (error) {
+        console.error(`❌ Error getting consigner profile:`, error);
+        return;
+      }
+      
+      if (!profile?.push_token) {
+        console.log(`⚠️ No push token found for user ${userId}`);
         return;
       }
 
+      console.log(`📱 Push token found, sending push notification...`);
       // Send push notification
       await pushNotificationService.sendPushNotification(
         profile.push_token,
@@ -84,9 +135,9 @@ class AuctionNotificationService {
         data
       );
 
-      // Notification sent successfully
-    } catch {
-      // Silently handle errors in production
+      console.log(`✅ Push notification sent successfully to user ${userId}`);
+    } catch (error) {
+      console.error(`❌ Error in sendNotificationToUser:`, error);
     }
   }
 
@@ -296,6 +347,100 @@ class AuctionNotificationService {
       }
     } catch {
       // Silently handle errors in production
+    }
+  }
+
+  // Send notification to drivers about auction update (vehicle-specific)
+  async notifyAuctionUpdated(auctionId: string, auctionTitle: string, vehicleType: string, weight: number) {
+    try {
+      console.log('🔄 Starting notifyAuctionUpdated for auction:', auctionId, 'vehicleType:', vehicleType);
+      
+      // Use database function to get drivers (bypasses RLS)
+      const { data: driversResult, error } = await supabase
+        .rpc('get_drivers_for_notification', { vehicle_type_param: vehicleType }) as {
+          data: {
+            id: string;
+            username: string;
+            push_token: string;
+            vehicle_type: string;
+          }[] | null;
+          error: any;
+        };
+
+      console.log('🔍 Function query results:', {
+        driversFound: driversResult?.length || 0,
+        error
+      });
+
+      if (error) {
+        console.error('❌ Error calling notification function:', error);
+        return;
+      }
+
+      const drivers = driversResult || [];
+      if (drivers.length === 0) {
+        console.log('⚠️ No drivers found for notifications');
+        return;
+      }
+
+      console.log('👥 Found drivers:', drivers.length);
+      console.log('👥 Raw driver data:', JSON.stringify(drivers, null, 2));
+
+      // All returned drivers already have push tokens (filtered in function)
+      const validDrivers = drivers;
+      console.log('📱 Valid drivers with push tokens:', validDrivers.length);
+      console.log('📱 Valid driver details:', validDrivers.map(d => ({ 
+        username: d.username, 
+        vehicle_type: d.vehicle_type, 
+        push_token: d.push_token ? 'HAS_TOKEN' : 'NO_TOKEN'
+      })));
+
+      if (validDrivers.length === 0) {
+        console.log('⚠️ No drivers with push tokens found');
+        return;
+      }
+      console.log('📱 Valid driver details:', validDrivers.map(d => ({ 
+        username: d.username, 
+        vehicle_type: d.vehicle_type, 
+        push_token: d.push_token ? 'HAS_TOKEN' : 'NO_TOKEN'
+      })));
+
+      if (validDrivers.length === 0) {
+        console.log('⚠️ No drivers with push tokens found');
+        return;
+      }
+
+      const data: AuctionNotificationData = {
+        auctionId,
+        auctionTitle,
+        type: 'auction_updated', // New type for auction updates
+      };
+
+      // Vehicle type display name
+      const vehicleDisplayName = vehicleType.split('_').map(word =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(' ');
+
+      // Send notification to drivers (drivers only)
+      for (const driver of validDrivers) {
+        try {
+          console.log(`📢 Sending notification to driver ${driver.username} (${driver.id})`);
+          await this.sendNotificationToUser(
+            driver.id,
+            '🔄 Auction Updated!',
+            `${auctionTitle} • ${vehicleDisplayName} • ${weight}kg has been updated`,
+            data,
+            'driver' // Only drivers should get auction update notifications
+          );
+          console.log(`✅ Notification sent to driver ${driver.username}`);
+        } catch (error) {
+          console.error(`❌ Error sending notification to driver ${driver.username}:`, error);
+        }
+      }
+      
+      console.log('✅ notifyAuctionUpdated completed');
+    } catch (error) {
+      console.error('❌ Error in notifyAuctionUpdated:', error);
     }
   }
 }

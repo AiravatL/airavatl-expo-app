@@ -102,9 +102,8 @@ export default function AuctionsScreen() {
         // Add vehicle type filter if specified
         if (selectedVehicleType !== 'all') {
           query = query.eq('vehicle_type', selectedVehicleType);
-        } else if (profile.vehicle_type) {
-          query = query.eq('vehicle_type', profile.vehicle_type);
         }
+        // Note: When 'all' is selected, show all auctions regardless of vehicle type
 
         const { data: auctionsData, error: auctionsError } = await query;
 

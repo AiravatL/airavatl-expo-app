@@ -1,5 +1,4 @@
-import * as React from 'react';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { dataService } from '@/lib/services/dataService';
+import { dataService } from '@/lib/services';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Auction {
