@@ -33,6 +33,7 @@ interface AuctionFormSharedProps {
   auctionId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
+  showSuccessAlert?: boolean;
 }
 
 export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
@@ -41,6 +42,7 @@ export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
   auctionId,
   onSuccess,
   onCancel,
+  showSuccessAlert = true,
 }) => {
   const [from, setFrom] = useState(initialData.from || '');
   const [to, setTo] = useState(initialData.to || '');
@@ -252,18 +254,27 @@ export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
           }
         }, 100);
 
-        Alert.alert('Success', 'Auction updated successfully!', [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (onSuccess) {
-                onSuccess();
-              } else {
-                router.push(`/auctions/${auctionId}`);
-              }
+        if (showSuccessAlert) {
+          Alert.alert('Success', 'Auction updated successfully!', [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onSuccess) {
+                  onSuccess();
+                } else {
+                  router.push(`/auctions/${auctionId}`);
+                }
+              },
             },
-          },
-        ]);
+          ]);
+        } else {
+          // Direct success callback without alert
+          if (onSuccess) {
+            onSuccess();
+          } else {
+            router.push(`/auctions/${auctionId}`);
+          }
+        }
       } else {
         // Create new auction
         const { data: createdAuction, error: auctionError } = await supabase

@@ -18,6 +18,7 @@ export default function ConsignerTabsLayout() {
         },
         headerStyle: { backgroundColor: '#FFFFFF' },
         headerTitleStyle: { fontFamily: 'Inter_600SemiBold', fontSize: 17 },
+        headerTintColor: '#007AFF',
       }}
     >
       {/* Home Tab */}
@@ -34,10 +35,10 @@ export default function ConsignerTabsLayout() {
 
       {/* Auctions Tab */}
       <Tabs.Screen
-        name="auctions/index"
+        name="auctions"
         options={{
           title: 'Auctions',
-          headerShown: false,
+          headerShown: false, // Let the stack handle headers
           tabBarIcon: ({ size, color }) => (
             <Feather name="package" size={size} color={color} />
           ),
@@ -61,7 +62,7 @@ export default function ConsignerTabsLayout() {
         name="history/index"
         options={{
           title: 'History',
-          headerShown: false,
+          headerTitle: 'Auction History',
           tabBarIcon: ({ size, color }) => (
             <Feather name="clock" size={size} color={color} />
           ),
@@ -79,10 +80,6 @@ export default function ConsignerTabsLayout() {
           ),
         }}
       />
-
-      {/* Hide nested routes */}
-      <Tabs.Screen name="auctions/[id]/index" options={{ href: null }} />
-      <Tabs.Screen name="auctions/[id]/edit-auction" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -80,18 +80,18 @@ export default function DriverTabsLayout() {
           tabBarIcon: ({ size, color, focused }) => (
             <Feather name="home" size={focused ? 26 : 24} color={color} />
           ),
-          headerTitle: 'Driver Dashboard',
+          headerTitle: 'Home',
           tabBarLabel: 'Home',
         }}
       />
       <Tabs.Screen
-        name="jobs/index"
+        name="jobs"
         options={{
           title: 'Available Jobs',
+          headerShown: false, // Let the stack handle headers
           tabBarIcon: ({ size, color, focused }) => (
             <Feather name="briefcase" size={focused ? 26 : 24} color={color} />
           ),
-          headerTitle: 'Available Jobs',
           tabBarLabel: 'Jobs',
           tabBarBadge: undefined, // You can add new jobs count here
         }}

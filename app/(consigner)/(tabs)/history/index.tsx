@@ -1,157 +1,234 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
+  StyleSheet,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { format, isPast } from 'date-fns';
 
-import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 
-type HistoryAuction = {
+interface Auction {
   id: string;
   title: string;
   description: string;
-  consignment_date: string;
+  status: string;
   end_time: string;
   vehicle_type: string;
-  status: string;
-  created_at: string;
+  created_by: string;
   winner_id: string | null;
-  winning_bid_id: string | null;
-  auction_bids: {
-    id: string;
-    amount: number;
-    user_id: string;
-    profiles: {
-      username: string;
-      phone_number: string;
-    };
-  }[];
-  winner_profile?: {
-    username: string;
-    phone_number: string;
-  };
-  winning_bid?: {
-    amount: number;
-  };
-};
+  start_time: string;
+  consignment_date: string;
+  created_at?: string;
+}
 
-export default function ConsignerHistoryScreen() {
-  const [auctions, setAuctions] = useState<HistoryAuction[]>([]);
+export default function HistoryScreen() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [auctions, setAuctions] = useState<Auction[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'completed' | 'cancelled'>(
-    'all'
-  );
 
-  const fetchHistory = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setError(null);
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        router.replace('/sign-in');
+        router.replace('/(auth)/sign-in');
         return;
       }
 
-      let query = supabase
+      // Fetch user's non-active auctions (completed, cancelled) and expired active auctions
+      const { data: userAuctions, error: auctionsError } = await supabase
         .from('auctions')
-        .select(
-          `
-          *,
-          auction_bids(
-            id,
-            amount,
-            user_id,
-            profiles(username, phone_number)
-          ),
-          winner_profile:profiles!auctions_winner_id_fkey(username, phone_number),
-          winning_bid:auction_bids!auctions_winning_bid_id_fkey(amount)
-        `
-        )
+        .select('*')
         .eq('created_by', user.id)
-        .in('status', ['completed', 'cancelled'])
-        .order('end_time', { ascending: false });
+        .order('created_at', { ascending: false });
 
-      if (filter !== 'all') {
-        query = query.eq('status', filter);
+      if (auctionsError) {
+        throw auctionsError;
       }
 
-      const { data, error } = await query;
+      // Filter for completed, cancelled, or expired auctions
+      const historyAuctions =
+        (userAuctions as Auction[])?.filter(auction => {
+          const endTime = new Date(auction.end_time);
+          const isExpired = isPast(endTime);
 
-      if (error) throw error;
-      setAuctions(data || []);
-    } catch (err: any) {
-      console.error('Error fetching history:', err);
-      setError(err.message || 'Failed to load history');
+          return (
+            auction.status === 'completed' ||
+            auction.status === 'cancelled' ||
+            (auction.status === 'active' && isExpired)
+          );
+        }) || [];
+
+      setAuctions(historyAuctions);
+    } catch {
+      setError('Failed to load auction history. Please try again.');
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
+  }, [router]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
   };
 
   useEffect(() => {
-    fetchHistory();
-  }, [filter]);
+    fetchData();
+  }, [fetchData]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchHistory();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return '#059669';
-      case 'cancelled':
-        return '#EF4444';
-      default:
-        return '#6B7280';
-    }
-  };
-
-  const getVehicleTypeLabel = (type: string) => {
-    return type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-  };
-
-  const FilterButton = ({
-    value,
-    label,
-  }: {
-    value: typeof filter;
-    label: string;
-  }) => (
-    <TouchableOpacity
-      style={[
-        styles.filterButton,
-        filter === value && styles.activeFilterButton,
-      ]}
-      onPress={() => setFilter(value)}
-    >
-      <Text
-        style={[styles.filterText, filter === value && styles.activeFilterText]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
   );
+
+  const getAuctionStatusColor = (auction: Auction) => {
+    if (auction.status === 'active') {
+      // Check if auction is expired
+      if (isPast(new Date(auction.end_time))) {
+        return '#DC3545'; // Red for expired
+      }
+      return '#28A745'; // Green for active (shouldn't happen in history)
+    } else if (auction.status === 'completed') {
+      return '#007AFF'; // Blue for completed
+    } else if (auction.status === 'cancelled') {
+      return '#DC3545'; // Red for cancelled
+    }
+    return '#6C757D'; // Gray for unknown
+  };
+
+  const getAuctionStatusText = (auction: Auction) => {
+    if (auction.status === 'active') {
+      // Check if auction is expired
+      if (isPast(new Date(auction.end_time))) {
+        return 'Expired';
+      }
+      return 'Active';
+    }
+    return auction.status.charAt(0).toUpperCase() + auction.status.slice(1);
+  };
+
+  const getStatusDescription = (auction: Auction) => {
+    if (auction.status === 'completed') {
+      return auction.winner_id ? 'Sold successfully' : 'Completed without sale';
+    } else if (auction.status === 'cancelled') {
+      return 'Cancelled by consigner';
+    } else if (
+      auction.status === 'active' &&
+      isPast(new Date(auction.end_time))
+    ) {
+      return auction.winner_id ? 'Expired - had bids' : 'Expired - no bids';
+    }
+    return '';
+  };
+
+  const renderHistoryAuctions = () => {
+    if (auctions.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <Feather name="archive" size={48} color="#6C757D" />
+          <Text style={styles.emptyStateTitle}>No Auction History</Text>
+          <Text style={styles.emptyStateText}>
+            Your completed, cancelled, and expired auctions will appear here
+          </Text>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => router.push('/(consigner)/(tabs)/create')}
+          >
+            <Text style={styles.createButtonText}>Create Auction</Text>
+            <Feather name="plus" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return auctions.map(auction => (
+      <TouchableOpacity
+        key={auction.id}
+        style={styles.card}
+        onPress={() =>
+          router.push(`/(consigner)/(tabs)/auctions/${auction.id}`)
+        }
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{auction.title}</Text>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getAuctionStatusColor(auction) },
+            ]}
+          >
+            <Text style={styles.statusText}>
+              {getAuctionStatusText(auction)}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={styles.description} numberOfLines={2}>
+          {auction.description}
+        </Text>
+
+        <View style={styles.vehicleInfo}>
+          <Feather name="truck" size={16} color="#6C757D" />
+          <Text style={styles.vehicleType}>
+            {auction.vehicle_type
+              .split('_')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ')}
+          </Text>
+        </View>
+
+        <View style={styles.statusInfo}>
+          <Feather name="info" size={16} color="#6C757D" />
+          <Text style={styles.statusDescription}>
+            {getStatusDescription(auction)}
+          </Text>
+        </View>
+
+        <View style={styles.timeInfo}>
+          <Feather name="clock" size={16} color="#6C757D" />
+          <Text style={styles.timeText}>
+            {auction.status === 'completed'
+              ? `Completed ${format(
+                  new Date(auction.end_time),
+                  'MMM d, h:mm a'
+                )}`
+              : auction.status === 'cancelled'
+              ? `Cancelled ${format(
+                  new Date(auction.end_time),
+                  'MMM d, h:mm a'
+                )}`
+              : `Expired ${format(
+                  new Date(auction.end_time),
+                  'MMM d, h:mm a'
+                )}`}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    ));
+  };
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading history...</Text>
+        <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
   }
@@ -159,380 +236,175 @@ export default function ConsignerHistoryScreen() {
   if (error) {
     return (
       <View style={styles.errorContainer}>
-        <Feather name="alert-circle" size={48} color="#EF4444" />
-        <Text style={styles.errorTitle}>Failed to Load History</Text>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchHistory}>
-          <Text style={styles.retryButtonText}>Try Again</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+          <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Auction History</Text>
-      </View>
-
-      <View style={styles.filterContainer}>
-        <FilterButton value="all" label="All" />
-        <FilterButton value="completed" label="Completed" />
-        <FilterButton value="cancelled" label="Cancelled" />
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {auctions.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Feather name="clock" size={64} color="#D1D5DB" />
-            <Text style={styles.emptyTitle}>No History Yet</Text>
-            <Text style={styles.emptyText}>
-              Your completed and cancelled auctions will appear here
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.auctionsList}>
-            {auctions.map(auction => (
-              <View key={auction.id} style={styles.auctionCard}>
-                <View style={styles.auctionHeader}>
-                  <Text style={styles.auctionTitle} numberOfLines={1}>
-                    {auction.title}
-                  </Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(auction.status) },
-                    ]}
-                  >
-                    <Text style={styles.statusText}>
-                      {auction.status.charAt(0).toUpperCase() +
-                        auction.status.slice(1)}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.auctionDescription} numberOfLines={2}>
-                  {auction.description}
-                </Text>
-
-                <View style={styles.detailsContainer}>
-                  <View style={styles.detailItem}>
-                    <Feather name="truck" size={14} color="#6B7280" />
-                    <Text style={styles.detailText}>
-                      {getVehicleTypeLabel(auction.vehicle_type)}
-                    </Text>
-                  </View>
-                  <View style={styles.detailItem}>
-                    <Feather name="calendar" size={14} color="#6B7280" />
-                    <Text style={styles.detailText}>
-                      {format(
-                        new Date(auction.consignment_date),
-                        'MMM dd, yyyy'
-                      )}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.bidsContainer}>
-                  <View style={styles.bidsSummary}>
-                    <Feather name="users" size={16} color="#3B82F6" />
-                    <Text style={styles.bidsText}>
-                      {auction.auction_bids.length} bid
-                      {auction.auction_bids.length !== 1 ? 's' : ''}
-                    </Text>
-                  </View>
-
-                  {auction.status === 'completed' && auction.winning_bid && (
-                    <View style={styles.winningBid}>
-                      <Text style={styles.winnerLabel}>Won by:</Text>
-                      <Text style={styles.winnerAmount}>
-                        ₹{auction.winning_bid.amount.toLocaleString()}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {auction.status === 'completed' && auction.winner_profile && (
-                  <View style={styles.winnerInfo}>
-                    <Feather name="award" size={16} color="#F59E0B" />
-                    <Text style={styles.winnerText}>
-                      Winner: {auction.winner_profile.username}
-                    </Text>
-                    {auction.winner_profile.phone_number && (
-                      <Text style={styles.winnerPhone}>
-                        {auction.winner_profile.phone_number}
-                      </Text>
-                    )}
-                  </View>
-                )}
-
-                <View style={styles.footerContainer}>
-                  <Text style={styles.endDate}>
-                    Ended {format(new Date(auction.end_time), 'MMM dd, yyyy')}
-                  </Text>
-                  <Text style={styles.createdDate}>
-                    Created {format(new Date(auction.created_at), 'MMM dd')}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-    </View>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+      }
+    >
+      {renderHistoryAuctions()}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F8F9FA',
   },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingBottom: 20,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    gap: 8,
-  },
-  filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-  },
-  activeFilterButton: {
-    backgroundColor: '#3B82F6',
-  },
-  filterText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6B7280',
-  },
-  activeFilterText: {
-    color: 'white',
-  },
-  scrollView: {
-    flex: 1,
+  content: {
+    padding: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6B7280',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
-    backgroundColor: '#F8FAFC',
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 16,
-    marginBottom: 8,
+    padding: 16,
   },
   errorText: {
     fontSize: 16,
-    color: '#EF4444',
+    fontFamily: 'Inter_600SemiBold',
+    color: '#DC3545',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   retryButton: {
+    backgroundColor: '#007AFF',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: '#3B82F6',
     borderRadius: 8,
+    marginBottom: 8,
   },
   retryButtonText: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  emptyState: {
-    alignItems: 'center',
-    padding: 48,
-    margin: 20,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyText: {
+    color: '#FFFFFF',
     fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
+    fontFamily: 'Inter_600SemiBold',
   },
-  auctionsList: {
-    padding: 20,
-    gap: 16,
-  },
-  auctionCard: {
-    backgroundColor: 'white',
+  card: {
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
+    marginBottom: 16,
     ...Platform.select({
-      ios: {
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
       },
-      android: {
-        elevation: 2,
-      },
     }),
   },
-  auctionHeader: {
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 8,
   },
-  auctionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
+  cardTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
   },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 12,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: 'white',
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
-  auctionDescription: {
+  description: {
     fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  detailsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
     marginBottom: 12,
   },
-  detailItem: {
+  vehicleInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    marginBottom: 8,
   },
-  detailText: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  bidsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  bidsSummary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  bidsText: {
+  vehicleType: {
+    marginLeft: 8,
     fontSize: 14,
-    color: '#3B82F6',
-    fontWeight: '500',
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
   },
-  winningBid: {
+  statusInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    marginBottom: 8,
   },
-  winnerLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  winnerAmount: {
+  statusDescription: {
+    marginLeft: 8,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#059669',
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
   },
-  winnerInfo: {
+  timeInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFBEB',
+  },
+  timeText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
   },
-  winnerText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#92400E',
-    flex: 1,
-  },
-  winnerPhone: {
-    fontSize: 12,
-    color: '#92400E',
-  },
-  footerContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  endDate: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  createdDate: {
-    fontSize: 12,
-    color: '#9CA3AF',
+  createButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    marginRight: 8,
   },
 });

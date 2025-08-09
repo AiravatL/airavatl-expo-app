@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-
 import { AuctionFormShared } from '@/components/forms';
 
 export default function EditAuctionScreen() {
@@ -43,7 +42,7 @@ export default function EditAuctionScreen() {
 
   const handleSuccess = () => {
     // Navigate back to auctions list and replace the current route
-    router.replace('/(consigner)/(tabs)/auctions');
+    router.replace('/auctions');
   };
 
   const handleCancel = () => {
@@ -53,11 +52,13 @@ export default function EditAuctionScreen() {
   return (
     <View style={styles.container}>
       <AuctionFormShared
+        key={`edit-auction-${params.id}`}
         mode="edit"
         initialData={initialData}
         auctionId={params.id as string}
         onSuccess={handleSuccess}
         onCancel={handleCancel}
+        showSuccessAlert={false}
       />
     </View>
   );
