@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -51,6 +52,8 @@ export default function AuctionDetailScreen() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [auctionHasBids, setAuctionHasBids] = useState(false);
   const [checkingBids, setCheckingBids] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const fetchAuctionDetails = useCallback(async () => {
     try {
@@ -187,7 +190,7 @@ export default function AuctionDetailScreen() {
           {
             text: 'Cancel Auction',
             style: 'destructive',
-            onPress: handleCancelAuction,
+            onPress: () => setShowCancelModal(true),
           },
         ]
       );
@@ -207,33 +210,40 @@ export default function AuctionDetailScreen() {
     });
   };
 
-  const handleCancelAuction = () => {
-    Alert.alert(
-      'Cancel Auction',
-      'Are you sure you want to cancel this auction? This action cannot be undone.',
-      [
-        { text: 'No', style: 'cancel' },
+  const handleCancelAuction = async () => {
+    try {
+      if (!currentUser || !auction) return;
+
+      setIsCancelling(true);
+
+      // Call the auction cancellation function
+      const { error } = await (supabase as any).rpc(
+        'cancel_auction_by_consigner',
         {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('auctions')
-                .update({ status: 'cancelled' })
-                .eq('id', String(params.id));
+          p_auction_id: String(params.id),
+          p_user_id: currentUser.id,
+        }
+      );
 
-              if (error) throw error;
+      if (error) throw error;
 
-              // Similar to create auction success flow - direct navigation with replace
-              router.replace('/(consigner)/(tabs)/auctions');
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'Failed to cancel auction');
-            }
+      // Close the modal and redirect to auctions list
+      setShowCancelModal(false);
+
+      Alert.alert('Success', 'Auction cancelled successfully', [
+        {
+          text: 'OK',
+          onPress: () => {
+            // Use replace to prevent back navigation to cancelled auction
+            router.replace('/(consigner)/(tabs)/auctions');
           },
         },
-      ]
-    );
+      ]);
+    } catch {
+      Alert.alert('Error', 'Failed to cancel auction. Please try again.');
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   const getAuctionStatusColor = (auction: Auction) => {
@@ -392,7 +402,7 @@ export default function AuctionDetailScreen() {
 
         <TouchableOpacity
           style={styles.actionCancelButton}
-          onPress={handleCancelAuction}
+          onPress={() => setShowCancelModal(true)}
         >
           <Feather name="x-circle" size={20} color="#FFFFFF" />
           <Text style={styles.actionCancelButtonText}>Cancel Auction</Text>
@@ -457,6 +467,45 @@ export default function AuctionDetailScreen() {
 
       {renderActionButtons()}
       {renderBidsList()}
+
+      {/* Cancel Auction Modal */}
+      <Modal
+        visible={showCancelModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCancelModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Cancel Auction</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to cancel this auction? This action cannot
+              be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowCancelModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Keep Auction</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={handleCancelAuction}
+                disabled={isCancelling}
+              >
+                {isCancelling ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>
+                    Cancel Auction
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -654,5 +703,66 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_400Regular',
     color: '#6C757D',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#1C1C1E',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#6C757D',
+  },
+  modalConfirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#DC3545',
+    alignItems: 'center',
+  },
+  modalConfirmButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
 });
