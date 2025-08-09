@@ -1,0 +1,112 @@
+
+airavatl-airavatl-expo-app-8a5edab282632443.txt : older version of the project
+
+
+1) What’s changing (structure) vs what must stay identical (UX/logic)
+Stays identical (reuse as-is):
+UI components (components/ui, forms, cards, inputs, empty states) and their styles. Both repos ship the same component sets, so reuse these directly.
+Libs for API, storage, notifications, utils, Zustand stores—names and locations are consistent. 
+Expo config, native permissions, and EAS profiles match; keep them unchanged. 
+
+Changes (routing layout):
+Old: a single (tabs) tree with dynamic role switching inside the tab layout. 
+New: role-scoped trees (driver)/(tabs) and (consigner)/(tabs) with role guards and a top-level index.tsx that redirects based on role. 
+
+
+ 
+ 2) Route mapping: old ➜ new
+Use this table to keep UX and paths consistent from the user’s POV while adopting the new structure.
+
+
+| Old route / screen    | Old path                                | New route / screen | New path                                                        |
+| --------------------- | --------------------------------------- | ------------------ | --------------------------------------------------------------- |
+| Home (driver)         | `(tabs)/index`                          | Driver Home        | `(driver)/(tabs)/home/index`                                    |
+| Jobs (driver list)    | `(tabs)/auctions`                       | Driver Jobs        | `(driver)/(tabs)/jobs/index`                                    |
+| Jobs History (driver) | n/a or part of tabs                     | Driver History     | `(driver)/(tabs)/history/index`                                 |
+| Profile (driver)      | `(tabs)/profile`                        | Driver Profile     | `(driver)/(tabs)/profile/index`                                 |
+| Consigner Home        | `(tabs)/index` (role-switched)          | Consigner Home     | `(consigner)/(tabs)/home/index`                                 |
+| My Auctions (list)    | `(tabs)/auctions/index`                 | My Auctions        | `(consigner)/(tabs)/auctions/index`                             |
+| Create Auction        | `(tabs)/auctions/create`                | Create Auction     | `(consigner)/(tabs)/auctions/create`                            |
+| Edit Auction          | `edit-auction` / `(tabs)/auctions/[id]` | Edit Auction       | `(consigner)/(tabs)/auctions/[id]/edit-auction` or `[id]/edit`  |
+| Consigner Profile     | `(tabs)/profile`                        | Consigner Profile  | `(consigner)/(tabs)/profile/index`                              |
+
+Tip: keep your screen component names and UI composition the same; only adjust the file paths and the router links.
+
+3) Top-level app flow (make it feel the same)
+Old flow: _layout.tsx boots app, then goes to (tabs) or sign-in. 
+New flow: _layout.tsx still gates on fonts/auth, but now index.tsx decides which role tree to enter.
+_layout.tsx shows splash → hides → replaces to / or /(auth)/sign-in. 
+ app/index.tsx fetches user → reads metadata or profile → redirects to (driver) or (consigner). 
+ Keep this logic exactly; it preserves the same “land the user where they belong” behavior.
+
+
+ 4) Exact steps to port screens with zero UX drift
+Freeze UI components
+Confirm both repos share the same UI component API. If anything diverged, overwrite new with the old versions in components/ui, components/forms, etc., to guarantee look & feel matches. 
+
+Copy feature screens into role folders
+
+Move driver-facing content under app/(driver)/(tabs)/{home|jobs|history|profile}. 
+
+Move consigner-facing content under app/(consigner)/(tabs)/{home|auctions|history|profile}. 
+
+Keep business logic identical
+Do not change lib/store code (Supabase client, API calls, notification helpers, Zustand slices). Reuse lib/api/*, lib/services/*, store/*, lib/notifications/* as-is. 
+
+Wire the role redirect
+
+In app/index.tsx, preserve: get user → read user.user_metadata.role → fallback to profiles.role → router.replace to (driver)/(tabs)/home or (consigner)/(tabs)/home. 
+ 
+
+Add role guards to each role layout
+
+(consigner)/_layout.tsx already checks auth and role and redirects to sign-in if invalid. Keep that pattern for (driver)/_layout.tsx too. 
+
+Repoint internal links
+Update navigation links from old flat (tabs) paths to the new role paths.
+Examples:
+
+router.replace('/(tabs)') ➜ router.replace('/(driver)/(tabs)/home') or /(consigner)/(tabs)/home depending on context. (Use the role-aware redirect in index.tsx to centralize this.) 
+ 
+
+Edit auction: previously /auctions after save—now ensure it returns to the consigner’s auctions tab: /(consigner)/(tabs)/auctions. 
+
+Keep the edit/create forms behavior
+Your EditAuctionScreen and shared AuctionFormShared can move unchanged; just fix the return route after success to target the right role scope. 
+ 
+
+Tabs
+The old app selected tab sets based on role at runtime; the new app splits tabs by role folder. Keep the same tab options/icons and screen names when you port them. See (consigner)/(tabs)/_layout.tsx as your baseline. 
+
+ 
+ 
+ 
+
+
+QA checklist (to confirm “feels the same”)
+Cold start → correct landing
+
+No session ➜ /(auth)/sign-in
+
+Driver ➜ (driver)/(tabs)/home
+
+Consigner ➜ (consigner)/(tabs)/home 
+ 
+
+Tab parity
+
+Tab titles, icons, headers, and component trees look identical to old app. Compare against old (tabs)/_layout.tsx config and mirror options in each role’s tabs layout. 
+ 
+
+Create/Edit Auction flows
+
+Opening edit pre-fills data; on save/cancel, you return to the same list as before (now scoped under consigner tabs). 
+ 
+
+Push notifications
+
+Registration triggers after auth; errors don’t block navigation. 
+
+Auth edge cases
+
+Invalid role or missing profile ➜ forced to sign-in as before. (Role guards in each role layout.) 

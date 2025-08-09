@@ -2,6 +2,8 @@
 import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 
+import { supabase } from '@/lib/supabase';
+
 export interface NotificationData {
   type: string;
   auctionId?: string;
@@ -13,36 +15,81 @@ export interface NotificationData {
 /**
  * Enhanced notification response handler with deep linking
  */
-export const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+export const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
   const data = response.notification.request.content.data as NotificationData;
   
   try {
+    // Get user role to determine the correct navigation path
+    const getUserRole = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return null;
+        
+        // Check role from user metadata first
+        if (user.user_metadata?.role) {
+          return user.user_metadata.role;
+        }
+        
+        // Fallback to profiles table
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+          
+        return profile?.role || null;
+      } catch (error) {
+        console.error('Error getting user role:', error);
+        return null;
+      }
+    };
+    
+    const userRole = await getUserRole();
+    
     switch (data.type) {
       case 'auction_won':
       case 'auction_ended':
       case 'new_bid':
       case 'outbid':
         if (data.auctionId) {
-          router.push(`/(tabs)/auctions/${data.auctionId}`);
+          if (userRole === 'driver') {
+            router.push('/(driver)/(tabs)/jobs'); // Take to jobs list since drivers view all auctions there
+          } else if (userRole === 'consigner') {
+            router.push('/(consigner)/(tabs)/auctions');
+          }
         }
         break;
         
       case 'auction_completed':
         if (data.auctionId) {
-          router.push(`/(tabs)/auctions/${data.auctionId}`);
+          if (userRole === 'driver') {
+            router.push('/(driver)/(tabs)/history');
+          } else if (userRole === 'consigner') {
+            router.push('/(consigner)/(tabs)/auctions');
+          }
         } else {
-          router.push('/(tabs)/profile');
+          if (userRole === 'driver') {
+            router.push('/(driver)/(tabs)/profile');
+          } else if (userRole === 'consigner') {
+            router.push('/(consigner)/(tabs)/profile');
+          }
         }
         break;
         
       default:
         // Default to main auction screen
-        router.push('/(tabs)/auctions');
+        if (userRole === 'driver') {
+          router.push('/(driver)/(tabs)/jobs');
+        } else if (userRole === 'consigner') {
+          router.push('/(consigner)/(tabs)/auctions');
+        } else {
+          router.push('/');
+        }
         break;
     }
   } catch {
     // Fallback to main screen
-    router.push('/(tabs)');
+    router.push('/');
   }
 };
 

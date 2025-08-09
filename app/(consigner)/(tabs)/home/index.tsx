@@ -10,7 +10,6 @@ import {
   Image,
 } from 'react-native';
 import { router } from 'expo-router';
-
 import { Feather } from '@expo/vector-icons';
 
 import { supabase } from '@/lib/supabase';
@@ -18,21 +17,22 @@ import { supabase } from '@/lib/supabase';
 // Use Feather icons instead of lucide-react-native for compatibility
 const FEATURES = [
   {
-    icon: <Feather name="truck" size={24} color="#007AFF" />,
-    title: 'Smart Auctions',
-    description: 'Create competitive auctions for your shipping needs',
-    highlight: '2,500+ Shipments',
+    icon: <Feather name="package" size={24} color="#007AFF" />,
+    title: 'Smart Logistics',
+    description:
+      'Efficient routing and real-time tracking for all your shipments',
+    highlight: '2,500+ Deliveries',
   },
   {
     icon: <Feather name="users" size={24} color="#34C759" />,
-    title: 'Trusted Drivers',
-    description: 'Network of verified drivers across Guwahati',
-    highlight: '500+ Drivers',
+    title: 'Trusted Partners',
+    description: 'Network of verified delivery partners across Guwahati',
+    highlight: '500+ Partners',
   },
   {
     icon: <Feather name="check-circle" size={24} color="#5856D6" />,
     title: 'Reliable Service',
-    description: 'Consistent and dependable shipping performance',
+    description: 'Consistent and dependable delivery performance',
     highlight: '98% Success Rate',
   },
 ];
@@ -56,15 +56,11 @@ export default function ConsignerHomeScreen() {
   }, []);
 
   const handleCreateAuction = () => {
-    router.push('./auctions/create');
+    router.push('./create');
   };
 
   const handleViewAuctions = () => {
     router.push('./auctions');
-  };
-
-  const handleViewHistory = () => {
-    router.push('./history');
   };
 
   return (
@@ -83,13 +79,23 @@ export default function ConsignerHomeScreen() {
             Your trusted logistics partner in Guwahati
           </Text>
 
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleCreateAuction}
-          >
-            <Feather name="plus" size={20} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Create Auction</Text>
-          </TouchableOpacity>
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleCreateAuction}
+            >
+              <Feather name="plus" size={20} color="#FFFFFF" />
+              <Text style={styles.primaryButtonText}>Create Auction</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleViewAuctions}
+            >
+              <Feather name="list" size={20} color="#007AFF" />
+              <Text style={styles.secondaryButtonText}>View My Auctions</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -118,10 +124,10 @@ export default function ConsignerHomeScreen() {
             style={styles.quickActionCard}
             onPress={handleCreateAuction}
           >
-            <Feather name="plus" size={32} color="#007AFF" />
-            <Text style={styles.quickActionTitle}>Create Auction</Text>
+            <Feather name="plus-circle" size={32} color="#007AFF" />
+            <Text style={styles.quickActionTitle}>Create New Auction</Text>
             <Text style={styles.quickActionDescription}>
-              Post a new shipping request
+              Start a new delivery auction
             </Text>
           </TouchableOpacity>
 
@@ -129,21 +135,10 @@ export default function ConsignerHomeScreen() {
             style={styles.quickActionCard}
             onPress={handleViewAuctions}
           >
-            <Feather name="package" size={32} color="#34C759" />
-            <Text style={styles.quickActionTitle}>My Auctions</Text>
+            <Feather name="clock" size={32} color="#34C759" />
+            <Text style={styles.quickActionTitle}>Active Auctions</Text>
             <Text style={styles.quickActionDescription}>
-              View your active auctions
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickActionCard}
-            onPress={handleViewHistory}
-          >
-            <Feather name="clock" size={32} color="#5856D6" />
-            <Text style={styles.quickActionTitle}>History</Text>
-            <Text style={styles.quickActionDescription}>
-              View completed auctions
+              View your ongoing auctions
             </Text>
           </TouchableOpacity>
         </View>
@@ -191,6 +186,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
   },
+  actionButtons: {
+    flexDirection: 'column',
+    gap: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
   primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -206,6 +207,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#007AFF',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    gap: 8,
+    width: '100%',
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
   section: {
     padding: 24,

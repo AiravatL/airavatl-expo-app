@@ -74,7 +74,7 @@ export default function DriverTabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="home"
+        name="home/index"
         options={{
           title: 'Dashboard',
           tabBarIcon: ({ size, color, focused }) => (
@@ -85,7 +85,7 @@ export default function DriverTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="jobs"
+        name="jobs/index"
         options={{
           title: 'Available Jobs',
           tabBarIcon: ({ size, color, focused }) => (
@@ -97,7 +97,7 @@ export default function DriverTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="history"
+        name="history/index"
         options={{
           title: 'My Jobs',
           tabBarIcon: ({ size, color, focused }) => (
@@ -108,7 +108,7 @@ export default function DriverTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="profile/index"
         options={{
           title: 'Profile',
           tabBarIcon: ({ size, color, focused }) => (

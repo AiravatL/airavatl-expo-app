@@ -7,68 +7,82 @@ export default function ConsignerTabsLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
         tabBarStyle: {
+          backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#E5E5E5',
+          height: 60,
+          paddingTop: 6,
+          paddingBottom: 8,
         },
-        headerStyle: {
-          backgroundColor: '#FFFFFF',
-        },
-        headerTitleStyle: {
-          fontFamily: 'Inter_600SemiBold',
-        },
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTitleStyle: { fontFamily: 'Inter_600SemiBold', fontSize: 17 },
       }}
     >
+      {/* Home Tab */}
       <Tabs.Screen
-        name="home"
+        name="home/index"
         options={{
           title: 'Home',
+          headerTitle: 'Welcome to AiravatL',
           tabBarIcon: ({ size, color }) => (
             <Feather name="home" size={size} color={color} />
           ),
-          headerTitle: 'Welcome to AiravatL',
         }}
       />
+
+      {/* Auctions Tab */}
       <Tabs.Screen
-        name="auctions"
+        name="auctions/index"
         options={{
           title: 'Auctions',
+          headerShown: false,
           tabBarIcon: ({ size, color }) => (
             <Feather name="package" size={size} color={color} />
           ),
-          headerShown: false,
         }}
       />
+
+      {/* Create Tab */}
       <Tabs.Screen
-        name="create"
+        name="create/index"
         options={{
           title: 'Create',
+          headerTitle: 'Create Auction',
           tabBarIcon: ({ size, color }) => (
             <Feather name="plus-circle" size={size} color={color} />
           ),
-          headerTitle: 'Create Auction',
         }}
       />
+
+      {/* History Tab */}
       <Tabs.Screen
-        name="history"
+        name="history/index"
         options={{
-          title: 'Info',
-          tabBarIcon: ({ size, color }) => (
-            <Feather name="info" size={size} color={color} />
-          ),
+          title: 'History',
           headerShown: false,
+          tabBarIcon: ({ size, color }) => (
+            <Feather name="clock" size={size} color={color} />
+          ),
         }}
       />
+
+      {/* Profile Tab */}
       <Tabs.Screen
-        name="profile"
+        name="profile/index"
         options={{
           title: 'Profile',
+          headerTitle: 'My Profile',
           tabBarIcon: ({ size, color }) => (
             <Feather name="user" size={size} color={color} />
           ),
-          headerTitle: 'My Profile',
         }}
       />
+
+      {/* Hide nested routes */}
+      <Tabs.Screen name="auctions/[id]/index" options={{ href: null }} />
+      <Tabs.Screen name="auctions/[id]/edit-auction" options={{ href: null }} />
     </Tabs>
   );
 }

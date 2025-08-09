@@ -51,7 +51,7 @@ export default function AuctionDetailScreen() {
   const fetchAuctionDetails = useCallback(async () => {
     try {
       setError(null);
-
+      
       // Fetch auction details
       const { data: auctionData, error: auctionError } = await supabase
         .from('auctions')
@@ -65,20 +65,19 @@ export default function AuctionDetailScreen() {
       // Fetch bids for this auction
       const { data: bidsData, error: bidsError } = await supabase
         .from('auction_bids')
-        .select(
-          `
+        .select(`
           id,
           amount,
           created_at,
           user_id,
           profiles(username, phone_number)
-        `
-        )
+        `)
         .eq('auction_id', params.id)
         .order('amount', { ascending: false });
 
       if (bidsError) throw bidsError;
       setBids(bidsData || []);
+
     } catch (err: any) {
       console.error('Error fetching auction details:', err);
       setError(err.message || 'Failed to load auction details');
@@ -99,7 +98,7 @@ export default function AuctionDetailScreen() {
 
   const handleEditAuction = () => {
     if (!auction) return;
-
+    
     router.push({
       pathname: `./edit-auction`,
       params: {
@@ -171,35 +170,25 @@ export default function AuctionDetailScreen() {
         <Feather name="alert-circle" size={48} color="#FF3B30" />
         <Text style={styles.errorTitle}>Failed to Load Auction</Text>
         <Text style={styles.errorText}>{error || 'Auction not found'}</Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={fetchAuctionDetails}
-        >
+        <TouchableOpacity style={styles.retryButton} onPress={fetchAuctionDetails}>
           <Text style={styles.retryButtonText}>Try Again</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  const isAuctionActive =
-    auction.status === 'active' && !isPast(new Date(auction.end_time));
+  const isAuctionActive = auction.status === 'active' && !isPast(new Date(auction.end_time));
   const highestBid = bids.length > 0 ? Math.max(...bids.map(b => b.amount)) : 0;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Auction Details</Text>
         {isAuctionActive && (
-          <TouchableOpacity
-            onPress={handleEditAuction}
-            style={styles.editButton}
-          >
+          <TouchableOpacity onPress={handleEditAuction} style={styles.editButton}>
             <Feather name="edit" size={20} color="#007AFF" />
           </TouchableOpacity>
         )}
@@ -214,15 +203,9 @@ export default function AuctionDetailScreen() {
         <View style={styles.auctionCard}>
           <View style={styles.auctionHeader}>
             <Text style={styles.auctionTitle}>{auction.title}</Text>
-            <View
-              style={[
-                styles.statusBadge,
-                { backgroundColor: getStatusColor(auction.status) },
-              ]}
-            >
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(auction.status) }]}>
               <Text style={styles.statusText}>
-                {auction.status.charAt(0).toUpperCase() +
-                  auction.status.slice(1)}
+                {auction.status.charAt(0).toUpperCase() + auction.status.slice(1)}
               </Text>
             </View>
           </View>
@@ -233,9 +216,7 @@ export default function AuctionDetailScreen() {
             <View style={styles.detailRow}>
               <Feather name="truck" size={16} color="#8E8E93" />
               <Text style={styles.detailLabel}>Vehicle Type:</Text>
-              <Text style={styles.detailValue}>
-                {getVehicleTypeLabel(auction.vehicle_type)}
-              </Text>
+              <Text style={styles.detailValue}>{getVehicleTypeLabel(auction.vehicle_type)}</Text>
             </View>
 
             <View style={styles.detailRow}>
@@ -250,17 +231,13 @@ export default function AuctionDetailScreen() {
               <Feather name="clock" size={16} color="#8E8E93" />
               <Text style={styles.detailLabel}>Bidding Period:</Text>
               <Text style={styles.detailValue}>
-                {format(new Date(auction.start_time), 'MMM dd')} -{' '}
-                {format(new Date(auction.end_time), 'MMM dd')}
+                {format(new Date(auction.start_time), 'MMM dd')} - {format(new Date(auction.end_time), 'MMM dd')}
               </Text>
             </View>
           </View>
 
           {isAuctionActive && (
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={handleCancelAuction}
-            >
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelAuction}>
               <Feather name="x-circle" size={16} color="#FF3B30" />
               <Text style={styles.cancelButtonText}>Cancel Auction</Text>
             </TouchableOpacity>
@@ -292,27 +269,21 @@ export default function AuctionDetailScreen() {
                   <View style={styles.bidHeader}>
                     <View style={styles.bidderInfo}>
                       <Feather name="user" size={16} color="#007AFF" />
-                      <Text style={styles.bidderName}>
-                        {bid.profiles.username}
-                      </Text>
+                      <Text style={styles.bidderName}>{bid.profiles.username}</Text>
                       {index === 0 && (
                         <View style={styles.topBidBadge}>
                           <Text style={styles.topBidText}>TOP BID</Text>
                         </View>
                       )}
                     </View>
-                    <Text style={styles.bidAmount}>
-                      ₹{bid.amount.toLocaleString()}
-                    </Text>
+                    <Text style={styles.bidAmount}>₹{bid.amount.toLocaleString()}</Text>
                   </View>
-
+                  
                   <View style={styles.bidFooter}>
                     <Text style={styles.bidTime}>
                       {format(new Date(bid.created_at), 'MMM dd, yyyy h:mm a')}
                     </Text>
-                    <Text style={styles.bidderPhone}>
-                      {bid.profiles.phone_number}
-                    </Text>
+                    <Text style={styles.bidderPhone}>{bid.profiles.phone_number}</Text>
                   </View>
                 </View>
               ))}
