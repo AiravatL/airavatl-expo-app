@@ -9,12 +9,27 @@ import {
   Alert,
   Platform,
   TextInput,
+  RefreshControl,
+  Linking,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { format, isPast } from 'date-fns';
+import { format, isPast, formatDistanceToNow } from 'date-fns';
 
 import { supabase } from '@/lib/supabase';
+
+// Utility function for Indian numbering system
+const formatIndianNumber = (num: number): string => {
+  const numStr = num.toString();
+  const lastThree = numStr.substring(numStr.length - 3);
+  const otherNumbers = numStr.substring(0, numStr.length - 3);
+  if (otherNumbers !== '') {
+    return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree;
+  } else {
+    return lastThree;
+  }
+};
 
 interface Auction {
   id: string;
@@ -42,9 +57,17 @@ interface Bid {
   is_winning_bid: boolean | null;
 }
 
+interface User {
+  id: string;
+  email?: string;
+  username?: string;
+  phone_number?: string | null;
+}
+
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
   const [auction, setAuction] = useState<Auction | null>(null);
   const [bids, setBids] = useState<Bid[]>([]);
   const [myBid, setMyBid] = useState<Bid | null>(null);
@@ -52,9 +75,50 @@ export default function JobDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [contactInfo, setContactInfo] = useState<{
+    username: string;
+    phone_number: string | null;
+  } | null>(null);
+  const [showCancelBidModal, setShowCancelBidModal] = useState(false);
+  const [isCancellingBid, setIsCancellingBid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchContactInfo = useCallback(
+    async (auctionData: Auction) => {
+      if (
+        !auctionData ||
+        auctionData.status !== 'completed' ||
+        !auctionData.winner_id ||
+        !currentUserId
+      ) {
+        return;
+      }
+
+      try {
+        // Driver won the job - show consigner's contact info
+        if (auctionData.winner_id === currentUserId) {
+          const { data: contactData, error: contactError } = await supabase
+            .from('profiles')
+            .select('username, phone_number')
+            .eq('id', auctionData.created_by)
+            .single();
+
+          if (contactError) {
+            console.error('Error fetching contact info:', contactError);
+          } else {
+            setContactInfo(contactData);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching contact info:', err);
+      }
+    },
+    [currentUserId]
+  );
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -74,33 +138,54 @@ export default function JobDetailScreen() {
         .single();
 
       if (auctionError) {
-        console.error('Error fetching auction:', auctionError);
+        setError('Job not found');
+        setAuction(null);
+        setBids([]);
         return;
       }
 
       setAuction(auctionData);
 
-      // Fetch all bids for this auction
+      // Fetch bids for this auction with profile info
       const { data: bidsData, error: bidsError } = await supabase
         .from('auction_bids')
-        .select('*')
+        .select(
+          `
+          *,
+          profiles!auction_bids_user_id_fkey (
+            id,
+            username
+          )
+        `
+        )
         .eq('auction_id', id)
-        .order('amount', { ascending: false });
+        .order('amount', { ascending: true }); // In driver auction, lowest bid wins
 
       if (bidsError) {
         console.error('Error fetching bids:', bidsError);
+        setBids([]);
       } else {
         setBids(bidsData || []);
         // Find current user's bid
         const userBid = bidsData?.find(bid => bid.user_id === user.id);
         setMyBid(userBid || null);
       }
+
+      // Fetch contact info for completed jobs
+      await fetchContactInfo(auctionData);
     } catch (error) {
       console.error('Error fetching data:', error);
+      setError('Failed to load job details');
     } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
-  }, [id, router]);
+  }, [id, router, fetchContactInfo]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+  };
 
   useEffect(() => {
     fetchData();
@@ -127,40 +212,29 @@ export default function JobDetailScreen() {
 
       // Check if auction is still active before placing bid
       if (auction.status !== 'active' || isPast(new Date(auction.end_time))) {
-        Alert.alert('Error', 'This auction has ended');
+        Alert.alert('Error', 'This job has ended');
         await fetchData();
         return;
       }
 
-      if (myBid) {
-        // Update existing bid
-        const { error } = await supabase
-          .from('auction_bids')
-          .update({ amount: amount })
-          .eq('id', myBid.id);
-
-        if (error) {
-          throw new Error(error.message || 'Failed to update bid');
-        }
-
-        Alert.alert('Success', 'Your bid has been updated successfully!');
-      } else {
-        // Create new bid
-        const { error } = await supabase.from('auction_bids').insert({
+      // Only create new bids - no update functionality
+      const { error: bidError } = await supabase
+        .from('auction_bids')
+        .insert({
           auction_id: auction.id,
           user_id: currentUserId,
           amount: amount,
-        });
+        })
+        .select()
+        .single();
 
-        if (error) {
-          throw new Error(error.message || 'Failed to place bid');
-        }
-
-        Alert.alert('Success', 'Your bid has been placed successfully!');
+      if (bidError) {
+        throw new Error(bidError.message || 'Failed to place bid');
       }
 
       setBidAmount('');
       await fetchData();
+      Alert.alert('Success', 'Your bid has been placed successfully!');
     } catch (error) {
       console.error('Error placing bid:', error);
       Alert.alert('Error', 'Failed to place bid. Please try again.');
@@ -169,68 +243,274 @@ export default function JobDetailScreen() {
     }
   };
 
-  const handleWithdrawBid = async () => {
-    if (!myBid) return;
+  const handleCancelBid = async () => {
+    try {
+      if (!currentUserId || !myBid) return;
 
-    Alert.alert(
-      'Withdraw Bid',
-      'Are you sure you want to withdraw your bid? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Withdraw',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsPlacingBid(true);
+      setIsCancellingBid(true);
 
-              const { error } = await supabase
-                .from('auction_bids')
-                .delete()
-                .eq('id', myBid.id);
+      // Use the same RPC function as the older version
+      const { error } = await (supabase as any).rpc('cancel_bid_by_driver', {
+        p_bid_id: myBid.id,
+        p_user_id: currentUserId,
+      });
 
-              if (error) {
-                throw error;
-              }
+      if (error) throw error;
 
-              Alert.alert(
-                'Success',
-                'Your bid has been withdrawn successfully'
-              );
-              setBidAmount('');
-              await fetchData();
-            } catch (error) {
-              console.error('Error withdrawing bid:', error);
-              Alert.alert('Error', 'Failed to withdraw bid. Please try again.');
-            } finally {
-              setIsPlacingBid(false);
-            }
-          },
-        },
-      ]
+      // Immediately clear the bid state to allow placing a new bid
+      setMyBid(null);
+      setBidAmount('');
+
+      // Close the modal and refresh data
+      setShowCancelBidModal(false);
+      await fetchData();
+
+      Alert.alert('Success', 'Your bid has been cancelled successfully');
+    } catch (error) {
+      console.error('Error cancelling bid:', error);
+      Alert.alert('Error', 'Failed to cancel bid. Please try again.');
+    } finally {
+      setIsCancellingBid(false);
+    }
+  };
+  const handleCallContact = () => {
+    if (contactInfo?.phone_number) {
+      const phoneUrl = `tel:${contactInfo.phone_number}`;
+      Linking.openURL(phoneUrl).catch(err => {
+        console.error('Error opening phone app:', err);
+        Alert.alert('Error', 'Unable to open phone app');
+      });
+    }
+  };
+
+  const renderCancelBidButton = () => {
+    // Only show cancel bid button for drivers who have placed a bid on an active job
+    // Match the older version's logic exactly
+    if (
+      !auction ||
+      !myBid ||
+      auction.status !== 'active' ||
+      isPast(new Date(auction.end_time)) ||
+      myBid.is_winning_bid
+    ) {
+      return null;
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.cancelBidButton}
+        onPress={() => setShowCancelBidModal(true)}
+      >
+        <Feather name="x-circle" size={20} color="#FFFFFF" />
+        <Text style={styles.cancelBidButtonText}>Cancel My Bid</Text>
+      </TouchableOpacity>
     );
   };
 
-  const getAuctionStatus = () => {
-    if (!auction) return { text: 'Unknown', color: '#6C757D' };
+  const renderContactInfo = () => {
+    if (
+      !contactInfo ||
+      auction?.status !== 'completed' ||
+      !auction?.winner_id
+    ) {
+      return null;
+    }
+
+    // Only show contact info to winner (for consigner)
+    const shouldShowContact = auction.winner_id === currentUserId;
+
+    if (!shouldShowContact) {
+      return null;
+    }
+
+    return (
+      <View style={styles.contactSection}>
+        <Text style={styles.contactTitle}>Consigner Contact</Text>
+        <View style={styles.contactCard}>
+          <View style={styles.contactInfo}>
+            <View style={styles.contactRow}>
+              <Feather name="user" size={20} color="#34C759" />
+              <Text style={styles.contactName}>{contactInfo.username}</Text>
+            </View>
+            {contactInfo.phone_number && (
+              <View style={styles.contactRow}>
+                <Feather name="phone" size={20} color="#34C759" />
+                <Text style={styles.contactPhone}>
+                  {contactInfo.phone_number}
+                </Text>
+              </View>
+            )}
+          </View>
+          {contactInfo.phone_number && (
+            <TouchableOpacity
+              style={styles.callButton}
+              onPress={handleCallContact}
+            >
+              <Feather name="phone" size={20} color="#FFFFFF" />
+              <Text style={styles.callButtonText}>Call</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {!contactInfo.phone_number && (
+          <Text style={styles.noPhoneText}>Phone number not available</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderJobStatus = () => {
+    if (!auction) return null;
+
+    let statusColor = '#6C757D';
+    let statusText = 'Unknown';
 
     if (auction.status === 'active') {
+      // Check if job should be expired
       if (isPast(new Date(auction.end_time))) {
-        return { text: 'Expired', color: '#DC3545' };
+        statusColor = '#DC3545';
+        statusText = 'Expired';
+      } else {
+        statusColor = '#34C759';
+        statusText = 'Active';
       }
-      return { text: 'Active', color: '#28A745' };
     } else if (auction.status === 'completed') {
-      return { text: 'Completed', color: '#007AFF' };
+      statusColor = '#007AFF';
+      statusText = 'Completed';
     } else if (auction.status === 'cancelled') {
-      return { text: 'Cancelled', color: '#DC3545' };
+      statusColor = '#DC3545';
+      statusText = 'Cancelled';
     }
-    return { text: auction.status, color: '#6C757D' };
+
+    return (
+      <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+        <Text style={styles.statusText}>{statusText}</Text>
+      </View>
+    );
+  };
+
+  const renderBidsList = () => {
+    if (!bids.length) {
+      return (
+        <View style={styles.noBidsContainer}>
+          <Text style={styles.noBidsText}>No bids yet</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.bidsContainer}>
+        <Text style={styles.bidsTitle}>Bids ({bids.length})</Text>
+        {bids.map((bid, index) => (
+          <View key={bid.id} style={styles.bidItem}>
+            <View style={styles.bidderInfo}>
+              <Text style={styles.bidderName}>
+                {bid.user_id === currentUserId ? 'You' : 'Driver'}
+              </Text>
+              <Text style={styles.bidAmount}>
+                ₹{formatIndianNumber(bid.amount)}
+              </Text>
+            </View>
+            {bid.is_winning_bid && (
+              <View style={styles.winningBadge}>
+                <Feather name="award" size={16} color="#FFD700" />
+                <Text style={styles.winningText}>Winner</Text>
+              </View>
+            )}
+            <Text style={styles.bidTime}>
+              {format(new Date(bid.created_at), 'MMM d, h:mm a')}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderWinnerSection = () => {
+    if (!auction || auction.status !== 'completed' || !auction.winner_id)
+      return null;
+
+    const winningBid = bids.find(bid => bid.is_winning_bid);
+    if (!winningBid) {
+      return (
+        <View style={styles.noWinnerSection}>
+          <Text style={styles.noWinnerText}>No winning bid was found</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.winnerSection}>
+        <View style={styles.winnerHeader}>
+          <Feather name="award" size={24} color="#FFD700" />
+          <Text style={styles.winnerTitle}>Job Winner</Text>
+        </View>
+        <View style={styles.winnerCard}>
+          <Text style={styles.winnerName}>
+            {winningBid.user_id === currentUserId ? 'You Won!' : 'Driver'}
+          </Text>
+          <View style={styles.winningBidAmount}>
+            <Text style={styles.winningBidText}>
+              ₹{formatIndianNumber(winningBid.amount)}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderTimeInfo = () => {
+    if (!auction) return null;
+
+    const endTime = new Date(auction.end_time);
+    const isExpired = isPast(endTime);
+
+    if (auction.status === 'active') {
+      if (isExpired) {
+        return (
+          <View style={styles.timeWarning}>
+            <Feather name="clock" size={16} color="#DC3545" />
+            <Text style={[styles.timeText, { color: '#DC3545' }]}>
+              Job has expired - closing soon
+            </Text>
+          </View>
+        );
+      } else {
+        return (
+          <View style={styles.timeInfo}>
+            <Feather name="clock" size={16} color="#6C757D" />
+            <Text style={styles.timeText}>
+              Ends {formatDistanceToNow(endTime, { addSuffix: true })}
+            </Text>
+          </View>
+        );
+      }
+    } else {
+      return (
+        <View style={styles.timeInfo}>
+          <Feather name="clock" size={16} color="#6C757D" />
+          <Text style={styles.timeText}>
+            Ended {formatDistanceToNow(endTime, { addSuffix: true })}
+          </Text>
+        </View>
+      );
+    }
   };
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#34C759" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -249,31 +529,35 @@ export default function JobDetailScreen() {
     );
   }
 
-  const status = getAuctionStatus();
-  const isActive =
+  const canBid =
     auction.status === 'active' && !isPast(new Date(auction.end_time));
-  const highestBid =
-    bids.length > 0 ? bids[0].amount : auction.minimum_bid || 0;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+      }
+    >
       <View style={styles.header}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>{auction.title}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
-            <Text style={styles.statusText}>{status.text}</Text>
-          </View>
-        </View>
+        <Text style={styles.title}>{auction.title}</Text>
+        {renderJobStatus()}
       </View>
 
-      {/* Description */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Job Description</Text>
+      <View style={styles.descriptionContainer}>
         <Text style={styles.description}>{auction.description}</Text>
       </View>
 
-      {/* Job Details */}
+      <View style={styles.statsContainer}>
+        <View style={styles.statItem}>
+          <Feather name="users" size={16} color="#6C757D" />
+          <Text style={styles.statText}>{bids.length} bids</Text>
+        </View>
+        {renderTimeInfo()}
+      </View>
+
+      {/* Vehicle and Job Info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Job Details</Text>
 
@@ -296,14 +580,6 @@ export default function JobDetailScreen() {
           </Text>
         </View>
 
-        <View style={styles.detailRow}>
-          <Feather name="clock" size={20} color="#6C757D" />
-          <Text style={styles.detailLabel}>Bidding Ends:</Text>
-          <Text style={styles.detailValue}>
-            {format(new Date(auction.end_time), 'MMM d, yyyy h:mm a')}
-          </Text>
-        </View>
-
         {auction.pickup_location && (
           <View style={styles.detailRow}>
             <Feather name="map-pin" size={20} color="#6C757D" />
@@ -321,130 +597,102 @@ export default function JobDetailScreen() {
         )}
       </View>
 
-      {/* Bidding Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Current Bidding</Text>
+      {renderCancelBidButton()}
+      {renderWinnerSection()}
+      {renderContactInfo()}
+      {renderBidsList()}
 
-        <View style={styles.bidInfo}>
-          <Text style={styles.bidLabel}>
-            {bids.length > 0 ? 'Highest Bid' : 'Minimum Bid'}:
-          </Text>
-          <Text style={styles.bidAmount}>${highestBid.toFixed(2)}</Text>
-        </View>
-
-        {myBid && (
-          <View style={styles.myBidInfo}>
-            <Text style={styles.myBidLabel}>Your Bid:</Text>
-            <Text style={styles.myBidAmount}>${myBid.amount.toFixed(2)}</Text>
-          </View>
-        )}
-
-        {isActive && (
-          <View style={styles.bidForm}>
-            <Text style={styles.bidFormLabel}>
-              {myBid ? 'Update Your Bid' : 'Place Your Bid'}
-            </Text>
-            <Text style={styles.bidHint}>
-              {myBid
-                ? `Current bid: $${myBid.amount.toFixed(
-                    2
-                  )} - Enter a higher amount to update`
-                : `Minimum bid: $${(highestBid + 1).toFixed(2)}`}
-            </Text>
-            <View style={styles.bidInputContainer}>
-              <Text style={styles.currencySymbol}>$</Text>
-              <TextInput
-                style={styles.bidInput}
-                value={bidAmount}
-                onChangeText={text => {
-                  // Allow only numbers and decimal point
-                  const cleanText = text.replace(/[^0-9.]/g, '');
-                  setBidAmount(cleanText);
-                }}
-                placeholder={`${(highestBid + 1).toFixed(2)}`}
-                keyboardType="decimal-pad"
-                editable={!isPlacingBid}
-                maxLength={10}
-              />
-            </View>
+      {/* Show bid input only for drivers who don't have an existing bid */}
+      {canBid && !myBid && (
+        <View style={styles.bidSection}>
+          <Text style={styles.bidSectionTitle}>Place Your Bid</Text>
+          <View style={styles.bidInputContainer}>
+            <TextInput
+              style={styles.bidInput}
+              value={bidAmount}
+              onChangeText={setBidAmount}
+              keyboardType="numeric"
+              placeholder="Enter bid amount"
+              placeholderTextColor="#6C757D"
+              editable={!isPlacingBid}
+            />
             <TouchableOpacity
               style={[
                 styles.bidButton,
-                myBid ? styles.updateBidButton : styles.placeBidButton,
-                { opacity: isPlacingBid ? 0.6 : 1 },
+                isPlacingBid && styles.bidButtonDisabled,
               ]}
               onPress={handlePlaceBid}
               disabled={isPlacingBid}
             >
               {isPlacingBid ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator color="#fff" />
               ) : (
                 <>
-                  <Feather
-                    name={myBid ? 'edit-2' : 'plus'}
-                    size={20}
-                    color="#FFFFFF"
-                    style={styles.bidButtonIcon}
-                  />
-                  <Text style={styles.bidButtonText}>
-                    {myBid ? 'Update Bid' : 'Place Bid'}
-                  </Text>
+                  <Text style={styles.bidButtonText}>Place Bid</Text>
+                  <Feather name="arrow-right" size={20} color="#fff" />
                 </>
               )}
             </TouchableOpacity>
-
-            {myBid && (
-              <TouchableOpacity
-                style={styles.withdrawBidButton}
-                onPress={handleWithdrawBid}
-                disabled={isPlacingBid}
-              >
-                <Feather name="x-circle" size={16} color="#DC3545" />
-                <Text style={styles.withdrawBidText}>Withdraw Bid</Text>
-              </TouchableOpacity>
-            )}
           </View>
-        )}
-
-        {!isActive && (
-          <View style={styles.inactiveBidding}>
-            <Text style={styles.inactiveBiddingText}>
-              {auction.status === 'completed'
-                ? 'This job has been completed'
-                : auction.status === 'cancelled'
-                ? 'This job has been cancelled'
-                : 'Bidding has ended for this job'}
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {/* Bid History */}
-      {bids.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Bid History</Text>
-          {bids.slice(0, 5).map((bid, index) => (
-            <View key={bid.id} style={styles.bidHistoryItem}>
-              <View style={styles.bidRank}>
-                <Text style={styles.bidRankText}>#{index + 1}</Text>
-              </View>
-              <View style={styles.bidHistoryContent}>
-                <Text style={styles.bidHistoryAmount}>
-                  ${bid.amount.toFixed(2)}
-                </Text>
-                <Text style={styles.bidHistoryTime}>
-                  {format(new Date(bid.created_at), 'MMM d, h:mm a')}
-                </Text>
-              </View>
-              {bid.user_id === currentUserId && (
-                <View style={styles.yourBidBadge}>
-                  <Text style={styles.yourBidText}>You</Text>
-                </View>
-              )}
-            </View>
-          ))}
         </View>
       )}
+
+      {myBid && canBid && (
+        <View style={styles.currentBidSection}>
+          <Text style={styles.currentBidTitle}>Your Current Bid</Text>
+          <View style={styles.currentBidCard}>
+            <Text style={styles.currentBidAmount}>
+              ₹{formatIndianNumber(myBid.amount)}
+            </Text>
+            <Text style={styles.currentBidStatus}>
+              {myBid.is_winning_bid ? 'Winning Bid' : 'Active Bid'}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {!canBid && auction.status === 'active' && (
+        <View style={styles.expiredNotice}>
+          <Text style={styles.expiredText}>This job has ended</Text>
+        </View>
+      )}
+
+      {/* Cancel Bid Modal */}
+      <Modal
+        visible={showCancelBidModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCancelBidModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Cancel Bid</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to cancel your bid of ₹
+              {myBid?.amount ? formatIndianNumber(myBid.amount) : '0'}?
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowCancelBidModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Keep Bid</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={handleCancelBid}
+                disabled={isCancellingBid}
+              >
+                {isCancellingBid ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>Cancel Bid</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -472,7 +720,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#DC3545',
+    textAlign: 'center',
     marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
   },
   backButton: {
     backgroundColor: '#34C759',
@@ -486,9 +747,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   header: {
-    marginBottom: 24,
-  },
-  titleRow: {
+    padding: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -500,15 +759,264 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 16,
   },
+  descriptionContainer: {
+    padding: 16,
+    paddingTop: 0,
+  },
+  description: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+    lineHeight: 24,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E5E5E5',
+    justifyContent: 'space-between',
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
+  timeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
   },
   statusText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  cancelBidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF6B35',
+    marginHorizontal: 16,
+    marginVertical: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  cancelBidButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    marginLeft: 8,
+  },
+  contactSection: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  contactTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+    marginBottom: 12,
+  },
+  contactCard: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+    }),
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  contactName: {
+    marginLeft: 12,
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+  },
+  contactPhone: {
+    marginLeft: 12,
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#34C759',
+  },
+  callButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginLeft: 12,
+  },
+  callButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    marginLeft: 8,
+  },
+  noPhoneText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  winnerSection: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+  },
+  winnerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  winnerTitle: {
+    marginLeft: 8,
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+  },
+  winnerCard: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  winnerName: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+  },
+  winningBidAmount: {
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  winningBidText: {
+    color: '#34C759',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  noWinnerSection: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  noWinnerText: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
+  bidsContainer: {
+    padding: 16,
+  },
+  bidsTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+    marginBottom: 12,
+  },
+  bidItem: {
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  bidderInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  bidderName: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#1C1C1E',
+  },
+  bidAmount: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#34C759',
+  },
+  bidTime: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
+  winningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8E5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  winningText: {
+    marginLeft: 4,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
-    color: '#FFFFFF',
+    color: '#FFB100',
+  },
+  noBidsContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  noBidsText: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
   },
   section: {
     backgroundColor: '#FFFFFF',
@@ -534,12 +1042,6 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     marginBottom: 12,
   },
-  description: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
-    lineHeight: 24,
-  },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -559,172 +1061,162 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     flex: 1,
   },
-  bidInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+  bidSection: {
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderTopWidth: 1,
+    borderColor: '#E5E5E5',
   },
-  bidLabel: {
-    fontSize: 16,
-    fontFamily: 'Inter_500Medium',
-    color: '#6C757D',
-  },
-  bidAmount: {
-    fontSize: 24,
-    fontFamily: 'Inter_700Bold',
-    color: '#34C759',
-  },
-  myBidInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#F0F9FF',
-    borderRadius: 8,
-  },
-  myBidLabel: {
-    fontSize: 16,
-    fontFamily: 'Inter_500Medium',
-    color: '#0369A1',
-  },
-  myBidAmount: {
+  bidSectionTitle: {
     fontSize: 18,
     fontFamily: 'Inter_600SemiBold',
-    color: '#0369A1',
-  },
-  bidForm: {
-    marginTop: 16,
-  },
-  bidFormLabel: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
     color: '#1C1C1E',
-    marginBottom: 8,
-  },
-  bidHint: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
     marginBottom: 12,
   },
   bidInputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-  },
-  currencySymbol: {
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#6C757D',
-    marginRight: 8,
+    gap: 12,
   },
   bidInput: {
     flex: 1,
-    fontSize: 18,
-    fontFamily: 'Inter_500Medium',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
     color: '#1C1C1E',
-    paddingVertical: 12,
   },
   bidButton: {
-    flexDirection: 'row',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  placeBidButton: {
     backgroundColor: '#34C759',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  updateBidButton: {
-    backgroundColor: '#007AFF',
-  },
-  bidButtonIcon: {
-    marginRight: 8,
+  bidButtonDisabled: {
+    opacity: 0.7,
   },
   bidButtonText: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
     color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
   },
-  withdrawBidButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#DC3545',
-  },
-  withdrawBidText: {
-    fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-    color: '#DC3545',
-    marginLeft: 6,
-  },
-  inactiveBidding: {
+  currentBidSection: {
+    margin: 16,
     padding: 16,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 16,
+    backgroundColor: '#E1F0FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#34C759',
   },
-  inactiveBiddingText: {
+  currentBidTitle: {
     fontSize: 16,
-    fontFamily: 'Inter_500Medium',
-    color: '#6C757D',
-    textAlign: 'center',
+    fontFamily: 'Inter_600SemiBold',
+    color: '#34C759',
+    marginBottom: 8,
   },
-  bidHistoryItem: {
+  currentBidCard: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
   },
-  bidRank: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  currentBidAmount: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#34C759',
   },
-  bidRankText: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#6C757D',
-  },
-  bidHistoryContent: {
-    flex: 1,
-  },
-  bidHistoryAmount: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1C1C1E',
-  },
-  bidHistoryTime: {
+  currentBidStatus: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
+    color: '#34C759',
   },
-  yourBidBadge: {
-    backgroundColor: '#34C759',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  expiredNotice: {
+    padding: 16,
+    backgroundColor: '#FEE2E2',
+    margin: 16,
+    borderRadius: 8,
+    alignItems: 'center',
   },
-  yourBidText: {
-    fontSize: 12,
+  expiredText: {
+    color: '#DC2626',
+    fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
+      },
+      default: {
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.2,
+        shadowRadius: 25,
+      },
+    }),
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#1C1C1E',
+    marginBottom: 16,
+  },
+  modalMessage: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  modalCancelButtonText: {
+    color: '#6C757D',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  modalConfirmButton: {
+    flex: 1,
+    backgroundColor: '#DC3545',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  modalConfirmButtonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    marginLeft: 8,
   },
 });

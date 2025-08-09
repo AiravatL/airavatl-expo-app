@@ -13,10 +13,11 @@ import {
   Linking,
   Modal,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { supabase } from '@/lib/supabase';
 import { formatDistanceToNow, isPast } from 'date-fns';
+
+import { supabase } from '../../../../../lib/supabase';
 
 interface Auction {
   id: string;
@@ -31,6 +32,9 @@ interface Auction {
   created_by: string;
   vehicle_type: string;
   consignment_date: string;
+  pickup_location?: string;
+  delivery_location?: string;
+  minimum_bid?: number;
   winner?: {
     username: string;
   } | null;
@@ -62,7 +66,6 @@ const JobDetailsScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
   const [contactInfo, setContactInfo] = useState<{
     username: string;
     phone_number: string | null;
@@ -79,108 +82,91 @@ const JobDetailsScreen = () => {
       } = await supabase.auth.getUser();
       if (user) {
         setCurrentUser(user);
-
-        // Get user role
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-
-        if (profile) {
-          setUserRole(profile.role);
-        }
       }
     };
     fetchUser();
   }, []);
 
   const fetchContactInfo = useCallback(
-    async (auctionData: Auction) => {
-      if (
-        !auctionData ||
-        auctionData.status !== 'completed' ||
-        !auctionData.winner_id ||
-        !currentUser
-      ) {
+    async (auction: Auction) => {
+      if (!auction || auction.status !== 'completed' || !auction.winner_id) {
+        setContactInfo(null);
+        return;
+      }
+
+      // Only fetch contact info if user is the winner or the consigner
+      const shouldFetch =
+        (currentUser && auction.winner_id === currentUser.id) ||
+        (currentUser && auction.created_by === currentUser.id);
+
+      if (!shouldFetch) {
+        setContactInfo(null);
         return;
       }
 
       try {
-        let contactUserId = null;
+        // Determine which contact to fetch based on user role
+        const contactUserId =
+          auction.winner_id === currentUser?.id
+            ? auction.created_by // If user is winner, get consigner contact
+            : auction.winner_id; // If user is consigner, get winner contact
 
-        // Driver viewing completed auction they won - show consigner's contact info
-        if (userRole === 'driver' && auctionData.winner_id === currentUser.id) {
-          contactUserId = auctionData.created_by;
+        const { data: contactData, error: contactError } = await supabase
+          .from('profiles')
+          .select('username, phone_number')
+          .eq('id', contactUserId)
+          .single();
+
+        if (contactError) {
+          console.error('Error fetching contact info:', contactError);
+          return;
         }
 
-        if (contactUserId) {
-          const { data: contactData, error: contactError } = await supabase
-            .from('profiles')
-            .select('username, phone_number')
-            .eq('id', contactUserId)
-            .single();
-
-          if (contactError) {
-            console.error('Error fetching contact info:', contactError);
-          } else {
-            setContactInfo(contactData);
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching contact info:', err);
+        setContactInfo(contactData);
+      } catch (error) {
+        console.error('Error fetching contact info:', error);
       }
     },
-    [currentUser, userRole]
+    [currentUser]
   );
 
   const fetchAuctionDetails = useCallback(async () => {
+    if (!params.id || Array.isArray(params.id)) return;
+
     try {
-      if (!params.id) {
-        setError('Job ID is missing');
-        return;
-      }
+      setIsLoading(true);
 
       // Fetch auction details
       const { data: auctionData, error: auctionError } = await supabase
         .from('auctions')
         .select('*')
-        .eq('id', String(params.id))
+        .eq('id', params.id)
         .single();
 
-      if (auctionError || !auctionData) {
-        setError('Job not found');
-        setAuction(null);
-        setBids([]);
-        return;
+      if (auctionError) {
+        throw new Error('Failed to load job details');
       }
 
-      // Fetch bids for this auction
+      // Fetch bids with profile information
       const { data: bidsData, error: bidsError } = await supabase
         .from('auction_bids')
         .select(
           `
-          id,
-          amount,
-          created_at,
-          is_winning_bid,
-          user_id,
-          auction_id,
-          profiles!auction_bids_user_id_fkey (
-            id,
-            username
-          )
+          *,
+          profiles (username)
         `
         )
-        .eq('auction_id', String(params.id))
-        .order('amount', { ascending: true });
+        .eq('auction_id', params.id)
+        .order('amount', { ascending: true }); // Lower bids first for transport auctions
 
       if (bidsError) {
         console.error('Error fetching bids:', bidsError);
-        setBids([]);
-      } else {
-        // Convert to expected Bid format
-        const convertedBids: Bid[] = (bidsData || []).map(bid => ({
+      }
+
+      // Convert bids data
+      let convertedBids: Bid[] = [];
+      if (bidsData && bidsData.length > 0) {
+        convertedBids = bidsData.map((bid: any) => ({
           id: bid.id,
           auction_id: bid.auction_id,
           user_id: bid.user_id,
@@ -203,6 +189,9 @@ const JobDetailsScreen = () => {
         created_by: auctionData.created_by,
         vehicle_type: auctionData.vehicle_type,
         consignment_date: auctionData.consignment_date,
+        pickup_location: (auctionData as any).pickup_location || undefined,
+        delivery_location: (auctionData as any).delivery_location || undefined,
+        minimum_bid: (auctionData as any).minimum_bid || undefined,
         created_at: auctionData.start_time,
         winner_id: auctionData.winner_id,
         winning_bid_id: null,
@@ -214,7 +203,7 @@ const JobDetailsScreen = () => {
       // Find user's bid if exists
       if (currentUser && bidsData) {
         const userBidData = bidsData.find(
-          bid => bid.user_id === currentUser.id
+          (bid: any) => bid.user_id === currentUser.id
         );
         if (userBidData) {
           setUserBid({
@@ -247,97 +236,99 @@ const JobDetailsScreen = () => {
   }, [params.id, fetchContactInfo, currentUser]);
 
   useEffect(() => {
-    fetchAuctionDetails();
+    if (currentUser) {
+      fetchAuctionDetails();
+    }
+  }, [fetchAuctionDetails, currentUser]);
 
-    // Real-time updates for active auctions
-    const interval = setInterval(() => {
-      if (auction?.status === 'active') {
-        fetchAuctionDetails();
+  const handleSubmitBid = async () => {
+    if (!auction || !currentUser || !bidAmount.trim()) {
+      Alert.alert('Error', 'Please enter a valid bid amount');
+      return;
+    }
+
+    const amount = parseFloat(bidAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid bid amount');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      // Check if auction is still active
+      if (auction.status !== 'active' || isPast(new Date(auction.end_time))) {
+        Alert.alert('Error', 'This job is no longer available for bidding');
+        return;
       }
-    }, 30000); // 30 seconds
 
-    return () => clearInterval(interval);
-  }, [fetchAuctionDetails, auction?.status]);
+      // For transport auctions, lower bids win (competitive pricing)
+      // Check if there's already a lower bid
+      const lowestBid =
+        bids.length > 0 ? Math.min(...bids.map(b => b.amount)) : Infinity;
+      if (amount >= lowestBid) {
+        Alert.alert(
+          'Higher Bid Exists',
+          `There's already a lower bid of ₹${lowestBid}. Transport jobs go to the lowest bidder.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Update existing bid or create new one
+      let result;
+      if (userBid) {
+        // Update existing bid
+        result = await supabase
+          .from('auction_bids')
+          .update({
+            amount: amount,
+            created_at: new Date().toISOString(),
+          })
+          .eq('id', userBid.id);
+      } else {
+        // Create new bid
+        result = await supabase.from('auction_bids').insert({
+          auction_id: auction.id,
+          user_id: currentUser.id,
+          amount: amount,
+        });
+      }
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      setBidAmount('');
+      await fetchAuctionDetails();
+    } catch {
+      Alert.alert('Error', 'Failed to place bid');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleCancelBid = async () => {
-    try {
-      if (!currentUser || !userBid) return;
+    if (!userBid) return;
 
+    try {
       setIsCancellingBid(true);
 
       const { error } = await supabase
         .from('auction_bids')
         .delete()
-        .eq('id', userBid.id)
-        .eq('user_id', currentUser.id);
+        .eq('id', userBid.id);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       setShowCancelBidModal(false);
       await fetchAuctionDetails();
-
-      Alert.alert('Success', 'Your bid has been cancelled successfully');
-    } catch (error) {
-      console.error('Error cancelling bid:', error);
-      Alert.alert('Error', 'Failed to cancel bid. Please try again.');
+    } catch {
+      Alert.alert('Error', 'Failed to cancel bid');
     } finally {
       setIsCancellingBid(false);
-    }
-  };
-
-  const handleSubmitBid = async () => {
-    if (!auction || !bidAmount || !currentUser) return;
-
-    try {
-      setIsSubmitting(true);
-      const amount = parseFloat(bidAmount);
-
-      if (isNaN(amount) || amount <= 0) {
-        Alert.alert('Invalid Bid', 'Please enter a valid bid amount');
-        return;
-      }
-
-      // Check if auction is still active before placing bid
-      if (auction.status !== 'active' || isPast(new Date(auction.end_time))) {
-        Alert.alert('Error', 'This job has ended');
-        await fetchAuctionDetails();
-        return;
-      }
-
-      if (userBid) {
-        // Update existing bid
-        const { error } = await supabase
-          .from('auction_bids')
-          .update({ amount: amount })
-          .eq('id', userBid.id);
-
-        if (error) {
-          throw new Error(error.message || 'Failed to update bid');
-        }
-
-        Alert.alert('Success', 'Your bid has been updated successfully!');
-      } else {
-        // Create new bid
-        const { error } = await supabase.from('auction_bids').insert({
-          auction_id: auction.id,
-          user_id: currentUser.id,
-          amount: amount,
-        });
-
-        if (error) {
-          throw new Error(error.message || 'Failed to place bid');
-        }
-
-        Alert.alert('Success', 'Your bid has been placed successfully!');
-      }
-
-      setBidAmount('');
-      await fetchAuctionDetails();
-    } catch (error) {
-      console.error('Error placing bid:', error);
-      Alert.alert('Error', 'Failed to place bid. Please try again.');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -356,9 +347,9 @@ const JobDetailsScreen = () => {
     if (
       !auction ||
       !userBid ||
-      userRole !== 'driver' ||
       auction.status !== 'active' ||
-      isPast(new Date(auction.end_time))
+      isPast(new Date(auction.end_time)) ||
+      userBid.is_winning_bid
     ) {
       return null;
     }
@@ -383,17 +374,23 @@ const JobDetailsScreen = () => {
       return null;
     }
 
-    // Only show contact info to winner for consigner contact
+    // Only show contact info to winner (for consigner) or consigner (for winner)
     const shouldShowContact =
-      userRole === 'driver' && auction.winner_id === currentUser?.id;
+      auction.created_by === currentUser?.id ||
+      auction.winner_id === currentUser?.id;
 
     if (!shouldShowContact) {
       return null;
     }
 
+    const contactTitle =
+      auction.winner_id === currentUser?.id
+        ? 'Consigner Contact'
+        : 'Winner Contact';
+
     return (
       <View style={styles.contactSection}>
-        <Text style={styles.contactTitle}>Consigner Contact</Text>
+        <Text style={styles.contactTitle}>{contactTitle}</Text>
         <View style={styles.contactCard}>
           <View style={styles.contactInfo}>
             <View style={styles.contactRow}>
@@ -442,7 +439,7 @@ const JobDetailsScreen = () => {
         statusText = 'Active';
       }
     } else if (auction.status === 'completed') {
-      statusColor = '#34C759';
+      statusColor = '#007AFF';
       statusText = 'Completed';
     } else if (auction.status === 'cancelled') {
       statusColor = '#DC3545';
@@ -467,20 +464,19 @@ const JobDetailsScreen = () => {
 
     return (
       <View style={styles.bidsContainer}>
-        <Text style={styles.bidsTitle}>Current Bids ({bids.length})</Text>
+        <Text style={styles.bidsTitle}>Bids ({bids.length})</Text>
         {bids.map(bid => (
           <View key={bid.id} style={styles.bidItem}>
             <View style={styles.bidderInfo}>
               <Text style={styles.bidderName}>
                 {bid.bidder?.username || 'Anonymous'}
-                {bid.user_id === currentUser?.id && ' (You)'}
               </Text>
               <Text style={styles.bidAmount}>₹{bid.amount}</Text>
             </View>
             {bid.is_winning_bid && (
               <View style={styles.winningBadge}>
                 <Feather name="award" size={16} color="#FFD700" />
-                <Text style={styles.winningText}>Current Winner</Text>
+                <Text style={styles.winningText}>Winner</Text>
               </View>
             )}
           </View>
@@ -491,29 +487,22 @@ const JobDetailsScreen = () => {
 
   const renderWinnerSection = () => {
     if (!auction || auction.status === 'active') return null;
-
     const winningBid = bids.find(bid => bid.is_winning_bid);
-    if (!winningBid) {
-      return (
-        <View style={styles.noWinnerSection}>
-          <Text style={styles.noWinnerText}>No winning bid was found</Text>
-        </View>
-      );
-    }
+
+    if (!winningBid) return null;
 
     return (
       <View style={styles.winnerSection}>
-        <View style={styles.winnerHeader}>
-          <Feather name="award" size={24} color="#FFD700" />
-          <Text style={styles.winnerTitle}>Job Winner</Text>
-        </View>
+        <Text style={styles.winnerSectionTitle}>Job Winner</Text>
         <View style={styles.winnerCard}>
-          <Text style={styles.winnerName}>
-            {winningBid.bidder?.username || 'Winner'}
-            {winningBid.user_id === currentUser?.id && ' (You)'}
-          </Text>
-          <View style={styles.winningBidAmount}>
-            <Text style={styles.winningBidText}>₹{winningBid.amount}</Text>
+          <View style={styles.winnerInfo}>
+            <Feather name="award" size={24} color="#FFD700" />
+            <View style={styles.winnerDetails}>
+              <Text style={styles.winnerName}>
+                {winningBid.bidder?.username || 'Anonymous'}
+              </Text>
+              <Text style={styles.winnerBid}>₹{winningBid.amount}</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -524,22 +513,21 @@ const JobDetailsScreen = () => {
     if (!auction) return null;
 
     const endTime = new Date(auction.end_time);
-    const isExpired = isPast(endTime);
 
     if (auction.status === 'active') {
-      if (isExpired) {
+      if (isPast(endTime)) {
         return (
-          <View style={styles.timeWarning}>
+          <View style={styles.timeInfo}>
             <Feather name="clock" size={16} color="#DC3545" />
             <Text style={[styles.timeText, { color: '#DC3545' }]}>
-              Job has expired - closing soon
+              Expired {formatDistanceToNow(endTime, { addSuffix: true })}
             </Text>
           </View>
         );
       } else {
         return (
           <View style={styles.timeInfo}>
-            <Feather name="clock" size={16} color="#6C757D" />
+            <Feather name="clock" size={16} color="#34C759" />
             <Text style={styles.timeText}>
               Ends {formatDistanceToNow(endTime, { addSuffix: true })}
             </Text>
@@ -562,7 +550,6 @@ const JobDetailsScreen = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#34C759" />
-        <Text style={styles.loadingText}>Loading job details...</Text>
       </View>
     );
   }
@@ -570,7 +557,6 @@ const JobDetailsScreen = () => {
   if (error) {
     return (
       <View style={styles.errorContainer}>
-        <Feather name="alert-circle" size={48} color="#DC3545" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity
           style={styles.retryButton}
@@ -597,8 +583,6 @@ const JobDetailsScreen = () => {
             setRefreshing(true);
             fetchAuctionDetails();
           }}
-          colors={['#34C759']}
-          tintColor="#34C759"
         />
       }
     >
@@ -611,15 +595,39 @@ const JobDetailsScreen = () => {
         <Text style={styles.description}>{auction.description}</Text>
       </View>
 
-      <View style={styles.detailsContainer}>
-        <View style={styles.detailItem}>
-          <Feather name="truck" size={16} color="#6C757D" />
-          <Text style={styles.detailText}>Vehicle: {auction.vehicle_type}</Text>
+      <View style={styles.jobDetails}>
+        {auction.pickup_location && (
+          <View style={styles.detailRow}>
+            <Feather name="map-pin" size={16} color="#34C759" />
+            <Text style={styles.detailLabel}>Pickup:</Text>
+            <Text style={styles.detailValue}>{auction.pickup_location}</Text>
+          </View>
+        )}
+
+        {auction.delivery_location && (
+          <View style={styles.detailRow}>
+            <Feather name="navigation" size={16} color="#34C759" />
+            <Text style={styles.detailLabel}>Delivery:</Text>
+            <Text style={styles.detailValue}>{auction.delivery_location}</Text>
+          </View>
+        )}
+
+        <View style={styles.detailRow}>
+          <Feather name="truck" size={16} color="#34C759" />
+          <Text style={styles.detailLabel}>Vehicle:</Text>
+          <Text style={styles.detailValue}>
+            {auction.vehicle_type
+              .split('_')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ')}
+          </Text>
         </View>
-        <View style={styles.detailItem}>
-          <Feather name="calendar" size={16} color="#6C757D" />
-          <Text style={styles.detailText}>
-            Pickup: {new Date(auction.consignment_date).toLocaleDateString()}
+
+        <View style={styles.detailRow}>
+          <Feather name="calendar" size={16} color="#34C759" />
+          <Text style={styles.detailLabel}>Transport Date:</Text>
+          <Text style={styles.detailValue}>
+            {new Date(auction.consignment_date).toLocaleDateString()}
           </Text>
         </View>
       </View>
@@ -637,25 +645,22 @@ const JobDetailsScreen = () => {
       {renderContactInfo()}
       {renderBidsList()}
 
-      {canBid && userRole === 'driver' && !userBid && (
+      {canBid && !userBid && (
         <View style={styles.bidSection}>
           <Text style={styles.bidSectionTitle}>Place Your Bid</Text>
-          <Text style={styles.bidSectionSubtitle}>
-            Enter your competitive quote for this transport job
+          <Text style={styles.bidHint}>
+            Lower bids win transport jobs. Be competitive!
           </Text>
           <View style={styles.bidInputContainer}>
-            <View style={styles.currencyInput}>
-              <Text style={styles.currencySymbol}>₹</Text>
-              <TextInput
-                style={styles.bidInput}
-                value={bidAmount}
-                onChangeText={setBidAmount}
-                keyboardType="numeric"
-                placeholder="0.00"
-                placeholderTextColor="#6C757D"
-                editable={!isSubmitting}
-              />
-            </View>
+            <TextInput
+              style={styles.bidInput}
+              value={bidAmount}
+              onChangeText={setBidAmount}
+              keyboardType="numeric"
+              placeholder="Enter bid amount"
+              placeholderTextColor="#6C757D"
+              editable={!isSubmitting}
+            />
             <TouchableOpacity
               style={[
                 styles.bidButton,
@@ -665,7 +670,7 @@ const JobDetailsScreen = () => {
               disabled={isSubmitting}
             >
               {isSubmitting ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color="#fff" />
               ) : (
                 <>
                   <Text style={styles.bidButtonText}>Place Bid</Text>
@@ -683,49 +688,14 @@ const JobDetailsScreen = () => {
           <View style={styles.currentBidCard}>
             <Text style={styles.currentBidAmount}>₹{userBid.amount}</Text>
             <Text style={styles.currentBidStatus}>
-              {userBid.is_winning_bid ? '🏆 Leading Bid' : '📋 Active Bid'}
+              {userBid.is_winning_bid ? 'Winning Bid' : 'Active Bid'}
             </Text>
-          </View>
-          <View style={styles.updateBidContainer}>
-            <Text style={styles.updateBidLabel}>Update your bid:</Text>
-            <View style={styles.bidInputContainer}>
-              <View style={styles.currencyInput}>
-                <Text style={styles.currencySymbol}>₹</Text>
-                <TextInput
-                  style={styles.bidInput}
-                  value={bidAmount}
-                  onChangeText={setBidAmount}
-                  keyboardType="numeric"
-                  placeholder={userBid.amount.toString()}
-                  placeholderTextColor="#6C757D"
-                  editable={!isSubmitting}
-                />
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.updateBidButton,
-                  isSubmitting && styles.bidButtonDisabled,
-                ]}
-                onPress={handleSubmitBid}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Text style={styles.bidButtonText}>Update</Text>
-                    <Feather name="edit-2" size={18} color="#fff" />
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       )}
 
       {!canBid && auction.status === 'active' && (
         <View style={styles.expiredNotice}>
-          <Feather name="clock" size={24} color="#DC2626" />
           <Text style={styles.expiredText}>This job has ended</Text>
         </View>
       )}
@@ -739,13 +709,10 @@ const JobDetailsScreen = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Feather name="alert-triangle" size={24} color="#FF6B35" />
-              <Text style={styles.modalTitle}>Cancel Bid</Text>
-            </View>
-            <Text style={styles.modalMessage}>
-              Are you sure you want to cancel your bid of ₹{userBid?.amount}?
-              This action cannot be undone.
+            <Text style={styles.modalTitle}>Cancel Bid</Text>
+            <Text style={styles.modalDescription}>
+              Are you sure you want to cancel your bid? This action cannot be
+              undone.
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -760,14 +727,9 @@ const JobDetailsScreen = () => {
                 disabled={isCancellingBid}
               >
                 {isCancellingBid ? (
-                  <ActivityIndicator color="#fff" size="small" />
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <>
-                    <Feather name="x-circle" size={18} color="#fff" />
-                    <Text style={styles.modalConfirmButtonText}>
-                      Cancel Bid
-                    </Text>
-                  </>
+                  <Text style={styles.modalConfirmButtonText}>Cancel Bid</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -778,22 +740,17 @@ const JobDetailsScreen = () => {
   );
 };
 
+export default JobDetailsScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8F9FA',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6C757D',
-    fontFamily: 'Inter_400Regular',
   },
   errorContainer: {
     flex: 1,
@@ -806,8 +763,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     color: '#DC3545',
     textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   retryButton: {
     backgroundColor: '#34C759',
@@ -821,97 +777,106 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   header: {
-    padding: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
   title: {
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
     color: '#1C1C1E',
     flex: 1,
-    marginRight: 16,
+    marginRight: 12,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
   descriptionContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
   description: {
     fontSize: 16,
     fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
+    color: '#1C1C1E',
     lineHeight: 24,
   },
-  detailsContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+  jobDetails: {
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
-  detailItem: {
+  detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  detailText: {
-    marginLeft: 8,
+  detailLabel: {
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Inter_600SemiBold',
     color: '#6C757D',
+    marginLeft: 8,
+    marginRight: 8,
+    minWidth: 80,
+  },
+  detailValue: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#1C1C1E',
+    flex: 1,
   },
   statsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#E5E5E5',
     justifyContent: 'space-between',
-    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
   statItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statText: {
-    marginLeft: 8,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Inter_500Medium',
     color: '#6C757D',
+    marginLeft: 8,
   },
   timeInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  timeWarning: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   timeText: {
-    marginLeft: 8,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Inter_500Medium',
     color: '#6C757D',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  statusText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
+    marginLeft: 8,
   },
   cancelBidButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FF6B35',
-    marginHorizontal: 16,
-    marginVertical: 8,
+    backgroundColor: '#DC3545',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     borderRadius: 8,
+    margin: 16,
   },
   cancelBidButtonText: {
     color: '#FFFFFF',
@@ -922,10 +887,20 @@ const styles = StyleSheet.create({
   contactSection: {
     margin: 16,
     padding: 16,
-    backgroundColor: '#F0F9FF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E0F2FE',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   contactTitle: {
     fontSize: 18,
@@ -934,23 +909,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   contactCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
   },
   contactInfo: {
     flex: 1,
@@ -961,16 +922,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   contactName: {
-    marginLeft: 12,
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#1C1C1E',
+    marginLeft: 12,
   },
   contactPhone: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#6C757D',
     marginLeft: 12,
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: '#34C759',
   },
   callButton: {
     flexDirection: 'row',
@@ -979,7 +940,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
-    marginLeft: 12,
   },
   callButtonText: {
     color: '#FFFFFF',
@@ -994,63 +954,23 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 8,
   },
-  winnerSection: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#FFF8E5',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FFE082',
-  },
-  winnerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  winnerTitle: {
-    marginLeft: 8,
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1C1C1E',
-  },
-  winnerCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  winnerName: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1C1C1E',
-  },
-  winningBidAmount: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  winningBidText: {
-    color: '#34C759',
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  noWinnerSection: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  noWinnerText: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
-  },
   bidsContainer: {
+    margin: 16,
     padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   bidsTitle: {
     fontSize: 18,
@@ -1058,19 +978,43 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     marginBottom: 12,
   },
-  bidItem: {
-    backgroundColor: '#F8F9FA',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
+  noBidsContainer: {
+    margin: 16,
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
-  bidderInfo: {
+  noBidsText: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#6C757D',
+  },
+  bidItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F1F1',
+  },
+  bidderInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   bidderName: {
     fontSize: 14,
@@ -1079,47 +1023,96 @@ const styles = StyleSheet.create({
   },
   bidAmount: {
     fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Inter_700Bold',
     color: '#34C759',
   },
   winningBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF8E5',
+    backgroundColor: '#FFF3CD',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginTop: 4,
+    borderRadius: 6,
+    marginLeft: 12,
   },
   winningText: {
     marginLeft: 4,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
-    color: '#FFB100',
+    color: '#856404',
   },
-  noBidsContainer: {
+  winnerSection: {
+    margin: 16,
     padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
+  },
+  winnerSectionTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1C1C1E',
+    marginBottom: 12,
+  },
+  winnerCard: {
+    backgroundColor: '#FFF3CD',
+    padding: 16,
+    borderRadius: 8,
+  },
+  winnerInfo: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  noBidsText: {
+  winnerDetails: {
+    marginLeft: 16,
+    flex: 1,
+  },
+  winnerName: {
     fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: '#6C757D',
+    fontFamily: 'Inter_600SemiBold',
+    color: '#856404',
+  },
+  winnerBid: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#856404',
   },
   bidSection: {
+    margin: 16,
     padding: 16,
-    backgroundColor: '#F0F9FF',
-    borderTopWidth: 1,
-    borderColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   bidSectionTitle: {
     fontSize: 18,
     fontFamily: 'Inter_600SemiBold',
     color: '#1C1C1E',
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  bidSectionSubtitle: {
+  bidHint: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     color: '#6C757D',
@@ -1127,191 +1120,150 @@ const styles = StyleSheet.create({
   },
   bidInputContainer: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  currencyInput: {
-    flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-  },
-  currencySymbol: {
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#34C759',
-    marginRight: 4,
   },
   bidInput: {
     flex: 1,
-    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     fontSize: 16,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Inter_500Medium',
     color: '#1C1C1E',
+    marginRight: 12,
   },
   bidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#34C759',
-    borderRadius: 8,
     paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    justifyContent: 'center',
-  },
-  updateBidButton: {
-    backgroundColor: '#FF9500',
+    paddingVertical: 12,
     borderRadius: 8,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    justifyContent: 'center',
   },
   bidButtonDisabled: {
-    opacity: 0.7,
+    backgroundColor: '#A3A3A3',
   },
   bidButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+    marginRight: 8,
   },
   currentBidSection: {
     margin: 16,
     padding: 16,
-    backgroundColor: '#E1F0FF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#34C759',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
   },
   currentBidTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontFamily: 'Inter_600SemiBold',
-    color: '#34C759',
-    marginBottom: 8,
+    color: '#1C1C1E',
+    marginBottom: 12,
   },
   currentBidCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: '#E8F5E8',
+    padding: 16,
+    borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 16,
   },
   currentBidAmount: {
-    fontSize: 20,
+    fontSize: 24,
     fontFamily: 'Inter_700Bold',
     color: '#34C759',
+    marginBottom: 4,
   },
   currentBidStatus: {
     fontSize: 14,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'Inter_600SemiBold',
     color: '#34C759',
   },
-  updateBidContainer: {
-    borderTopWidth: 1,
-    borderTopColor: '#B3E5FC',
-    paddingTop: 16,
-  },
-  updateBidLabel: {
-    fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-    color: '#6C757D',
-    marginBottom: 8,
-  },
   expiredNotice: {
-    padding: 20,
-    backgroundColor: '#FEE2E2',
     margin: 16,
+    padding: 16,
+    backgroundColor: '#FEF2F2',
     borderRadius: 8,
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
   },
   expiredText: {
-    color: '#DC2626',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
-    marginLeft: 8,
+    color: '#DC3545',
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    padding: 20,
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 24,
     width: '100%',
     maxWidth: 400,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.2,
-        shadowRadius: 25,
-      },
-      android: {
-        elevation: 10,
-      },
-    }),
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
   },
   modalTitle: {
     fontSize: 20,
     fontFamily: 'Inter_700Bold',
     color: '#1C1C1E',
-    marginLeft: 12,
+    marginBottom: 12,
+    textAlign: 'center',
   },
-  modalMessage: {
+  modalDescription: {
     fontSize: 16,
     fontFamily: 'Inter_400Regular',
     color: '#6C757D',
-    lineHeight: 24,
+    textAlign: 'center',
     marginBottom: 24,
+    lineHeight: 24,
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    justifyContent: 'space-between',
   },
   modalCancelButton: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
-    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E5E5E5',
+    marginRight: 8,
+    alignItems: 'center',
   },
   modalCancelButtonText: {
-    color: '#6C757D',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+    color: '#6C757D',
   },
   modalConfirmButton: {
     flex: 1,
-    backgroundColor: '#FF6B35',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
+    backgroundColor: '#DC3545',
+    marginLeft: 8,
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
   },
   modalConfirmButtonText: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
 });
-
-export default JobDetailsScreen;

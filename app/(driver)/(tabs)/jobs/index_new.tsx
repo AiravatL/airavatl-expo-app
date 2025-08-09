@@ -13,19 +13,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { format, isPast } from 'date-fns';
 
-import { supabase } from '../../../../lib/supabase';
-
-// Utility function for Indian numbering system
-const formatIndianNumber = (num: number): string => {
-  const numStr = num.toString();
-  const lastThree = numStr.substring(numStr.length - 3);
-  const otherNumbers = numStr.substring(0, numStr.length - 3);
-  if (otherNumbers !== '') {
-    return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree;
-  } else {
-    return lastThree;
-  }
-};
+import { supabase } from '@/lib/supabase';
 
 interface Auction {
   id: string;
@@ -100,6 +88,8 @@ export default function JobsScreen() {
         throw auctionsError;
       }
 
+      setAuctions(availableAuctions || []);
+
       // Fetch user's bids with auction data
       const { data: userBids, error: bidsError } = await supabase
         .from('auction_bids')
@@ -142,30 +132,7 @@ export default function JobsScreen() {
           : null,
       }));
 
-      // Filter bids to only show those with active and non-expired auctions
-      const activeBids = convertedBids.filter(bid => {
-        if (!bid.auction) return false;
-
-        // Check if auction is active and not expired
-        const isActive = bid.auction.status === 'active';
-        const isNotExpired = !isPast(new Date(bid.auction.end_time));
-
-        return isActive && isNotExpired;
-      });
-
-      setBids(activeBids);
-
-      // Get auction IDs where user has already placed bids
-      const userBidAuctionIds = new Set(
-        convertedBids.map(bid => bid.auction_id)
-      );
-
-      // Filter available auctions to exclude those where user has already placed bids
-      const filteredAvailableAuctions = (availableAuctions || []).filter(
-        auction => !userBidAuctionIds.has(auction.id)
-      );
-
-      setAuctions(filteredAvailableAuctions);
+      setBids(convertedBids);
     } catch {
       setError('Failed to load available jobs. Please try again.');
     } finally {
@@ -423,9 +390,7 @@ export default function JobsScreen() {
             <View style={styles.bidInfo}>
               <View style={styles.bidAmount}>
                 <Feather name="credit-card" size={16} color="#34C759" />
-                <Text style={styles.bidAmountText}>
-                  ₹{formatIndianNumber(bid.amount)}
-                </Text>
+                <Text style={styles.bidAmountText}>₹{bid.amount}</Text>
               </View>
               <Text style={styles.bidTime}>
                 {bid.created_at

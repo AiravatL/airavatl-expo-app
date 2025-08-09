@@ -80,7 +80,7 @@ export default function DriverTabsLayout() {
           tabBarIcon: ({ size, color, focused }) => (
             <Feather name="home" size={focused ? 26 : 24} color={color} />
           ),
-          headerTitle: 'Home',
+          headerTitle: 'Welcome to AiravatL',
           tabBarLabel: 'Home',
         }}
       />
