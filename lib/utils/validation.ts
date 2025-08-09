@@ -139,3 +139,13 @@ export function validatePhone(phone: string): boolean {
     return false;
   }
 }
+
+export function validateUPI(upi: string): boolean {
+  // UPI ID format: username@bankname or username@paytm etc.
+  const upiRegex = /^[\w.-]+@[\w.-]+$/;
+  return upiRegex.test(upi) && upi.length >= 5 && upi.length <= 50;
+}
+
+export function validateWeight(weight: number): boolean {
+  return weight > 0 && weight <= 50000; // Max 50 tons
+}

@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
+import { View, ActivityIndicator, Text } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import {
   useFonts,
   Inter_400Regular,
   Inter_600SemiBold,
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
+
+import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { useAuth } from '@/hooks/useAuth';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { View, ActivityIndicator, Text } from 'react-native';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -48,7 +49,7 @@ export default function RootLayout() {
       // Wait a moment for the auth context to be fully established
       const timer = setTimeout(() => {
         // Don't block app loading if push notifications fail
-        registerForPushNotifications().catch((error) => {
+        registerForPushNotifications().catch(error => {
           if (__DEV__) {
             console.warn('Push notification setup failed:', error);
           }
@@ -80,7 +81,7 @@ export default function RootLayout() {
     }
 
     // Hide splash screen when everything is ready
-    SplashScreen.hideAsync().catch((error) => {
+    SplashScreen.hideAsync().catch(error => {
       console.warn('Failed to hide splash screen:', error);
     });
 
@@ -96,9 +97,9 @@ export default function RootLayout() {
 
         if (session?.user?.id) {
           if (__DEV__) {
-            console.log('🧭 Navigating to tabs');
+            console.log('🧭 Navigating to role-based home');
           }
-          router.replace('/(tabs)');
+          router.replace('/');
         } else {
           if (__DEV__) {
             console.log('🧭 Navigating to sign-in');
@@ -160,8 +161,10 @@ export default function RootLayout() {
   return (
     <>
       <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(driver)" options={{ headerShown: false }} />
+        <Stack.Screen name="(consigner)" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" options={{ presentation: 'modal' }} />
       </Stack>
       <StatusBar style="auto" />

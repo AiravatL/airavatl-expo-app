@@ -13,39 +13,7 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { router } from 'expo-router';
 import { DateTimePicker } from '@/components/common';
-
-const VEHICLE_TYPES = [
-  {
-    id: 'three_wheeler',
-    title: '3 Wheeler',
-    capacity: 'Up to 500kg',
-    icon: '🛺',
-  },
-  {
-    id: 'pickup_truck',
-    title: 'Pickup Truck',
-    capacity: 'Up to 1 ton',
-    icon: '🚚',
-  },
-  {
-    id: 'mini_truck',
-    title: 'Mini Truck',
-    capacity: 'Up to 2 tons',
-    icon: '🚛',
-  },
-  {
-    id: 'medium_truck',
-    title: 'Medium Truck',
-    capacity: 'Up to 5 tons',
-    icon: '🚛',
-  },
-  {
-    id: 'large_truck',
-    title: 'Large Truck',
-    capacity: 'Over 5 tons',
-    icon: '🚛',
-  },
-];
+import { VEHICLE_TYPES } from '@/constants/vehicleTypes';
 
 interface AuctionFormData {
   from: string;
@@ -207,7 +175,7 @@ export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
       const auctionData = {
         title: `Delivery from ${from} to ${to}`,
         description: `${description}\nWeight: ${weight} kg\nVehicle Type: ${
-          VEHICLE_TYPES.find((v) => v.id === vehicleType)?.title
+          VEHICLE_TYPES.find(v => v.id === vehicleType)?.title
         }`,
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
@@ -474,7 +442,7 @@ export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
           {errors.vehicleType && (
             <Text style={styles.errorText}>{errors.vehicleType}</Text>
           )}
-          {VEHICLE_TYPES.map((type) => (
+          {VEHICLE_TYPES.map(type => (
             <TouchableOpacity
               key={type.id}
               style={[
@@ -520,7 +488,7 @@ export const AuctionFormShared: React.FC<AuctionFormSharedProps> = ({
             <Text style={styles.errorText}>{errors.duration}</Text>
           )}
           <View style={styles.durationOptions}>
-            {[5, 10, 15, 30, 60].map((minutes) => (
+            {[5, 10, 15, 30, 60].map(minutes => (
               <TouchableOpacity
                 key={minutes}
                 style={[

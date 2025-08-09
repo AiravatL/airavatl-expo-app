@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { supabase } from '../../lib/supabase';
+
+import { supabase } from '@/lib/supabase';
 import { authStorage } from '@/lib/storage';
 
 type UserRole = 'consigner' | 'driver';
@@ -424,7 +425,7 @@ export default function SignUpScreen() {
                       ]}
                     >
                       {vehicleType
-                        ? VEHICLE_TYPES.find((v) => v.id === vehicleType)?.label
+                        ? VEHICLE_TYPES.find(v => v.id === vehicleType)?.label
                         : 'Select Vehicle Type'}
                     </Text>
                     <Feather name="chevron-right" size={20} color="#6C757D" />

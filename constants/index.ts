@@ -5,3 +5,4 @@ export * from './fonts';
 export * from './routes';
 export * from './storage-keys';
 export * from './dimensions';
+export * from './vehicleTypes';
